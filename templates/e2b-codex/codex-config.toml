@@ -1,0 +1,14 @@
+model_provider = "fireworks"
+model = "accounts/fireworks/models/kimi-k2p5"
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+model_context_window = 131072
+
+[model_providers.fireworks]
+name = "Fireworks"
+base_url = "https://api.fireworks.ai/inference/v1"
+env_key = "FIREWORKS_API_KEY"
+wire_api = "chat"
+
+[model_providers.fireworks.metadata]
+fallback_model = "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct"

@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: open_agents
+    ports:
+      - "5432:5432"
+    volumes:
+      - control-plane-postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      POSTGRES_URL: postgres://postgres:postgres@postgres:5432/open_agents
+      REDIS_URL: redis://redis:6379
+      E2B_API_KEY: ${E2B_API_KEY}
+      E2B_CODEX_TEMPLATE: ${E2B_CODEX_TEMPLATE:-codex}
+      FIREWORKS_API_KEY: ${FIREWORKS_API_KEY}
+      PORT: 8787
+    ports:
+      - "8787:8787"
+    depends_on:
+      - postgres
+      - redis
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      POSTGRES_URL: postgres://postgres:postgres@postgres:5432/open_agents
+      REDIS_URL: redis://redis:6379
+      E2B_API_KEY: ${E2B_API_KEY}
+      E2B_CODEX_TEMPLATE: ${E2B_CODEX_TEMPLATE:-codex}
+      FIREWORKS_API_KEY: ${FIREWORKS_API_KEY}
+      WORKER_CONCURRENCY: 2
+    depends_on:
+      - postgres
+      - redis
+
+volumes:
+  control-plane-postgres:

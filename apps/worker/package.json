@@ -1,0 +1,20 @@
+{
+  "name": "worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/worker.ts",
+    "start": "tsx src/worker.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@open-agents/control-plane": "workspace:*",
+    "tsx": "^4.22.4"
+  },
+  "devDependencies": {
+    "@open-agents/tsconfig": "workspace:*",
+    "@types/node": "^22",
+    "typescript": "^5"
+  }
+}

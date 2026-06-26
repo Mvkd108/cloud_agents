@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "web": "pnpm --dir apps/web dev",
+    "api": "pnpm --dir apps/api dev",
+    "worker": "pnpm --dir apps/worker dev",
     "dev": "turbo dev",
     "build": "turbo build",
     "sandbox:snapshot-base": "node scripts/vercel-refresh-base-snapshot.ts",

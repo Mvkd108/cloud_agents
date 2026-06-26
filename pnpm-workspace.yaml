@@ -22,4 +22,5 @@ allowBuilds:
   "@swc/core": true
   cbor-extract: true
   esbuild: true
+  msgpackr-extract: true
   sharp: true

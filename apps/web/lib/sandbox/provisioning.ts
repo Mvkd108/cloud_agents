@@ -4,6 +4,7 @@ import {
   connectSandbox,
   type Sandbox,
   type SandboxState,
+  type VercelState,
 } from "@open-agents/sandbox";
 import {
   getSessionById,
@@ -104,6 +105,14 @@ function buildSandboxSource(session: SessionRecord): SandboxState["source"] {
   };
 }
 
+type VercelSandboxState = { type: "vercel" } & VercelState;
+
+function isVercelSandboxState(
+  state: SandboxState | null | undefined,
+): state is VercelSandboxState {
+  return state?.type === "vercel";
+}
+
 function buildSandboxState(session: SessionRecord): SandboxState {
   const existingState = session.sandboxState;
   const sandboxName =
@@ -111,8 +120,9 @@ function buildSandboxState(session: SessionRecord): SandboxState {
   const source = buildSandboxSource(session);
 
   return {
-    type: "vercel",
-    ...(isSandboxState(existingState) ? existingState : {}),
+    ...(isVercelSandboxState(existingState)
+      ? existingState
+      : { type: "vercel" }),
     sandboxName,
     ...(source ? { source } : {}),
   };

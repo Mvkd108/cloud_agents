@@ -6,6 +6,10 @@
   "main": "./index.ts",
   "exports": {
     ".": "./index.ts",
+    "./e2b": "./e2b/index.ts",
+    "./e2b/index.js": "./e2b/index.ts",
+    "./e2b/sandbox.js": "./e2b/sandbox.ts",
+    "./e2b/config.js": "./e2b/config.ts",
     "./interface.js": "./interface.ts",
     "./types.js": "./types.ts",
     "./vercel": "./vercel/index.ts",
@@ -18,7 +22,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vercel/sandbox": "2.0.0-beta.11"
+    "@vercel/sandbox": "2.0.0-beta.11",
+    "e2b": "^2.29.1"
   },
   "devDependencies": {
     "@open-agents/tsconfig": "workspace:*",

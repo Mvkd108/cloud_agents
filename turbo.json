@@ -6,7 +6,10 @@
       "env": [
         "BETTER_AUTH_SECRET",
         "BLOB_READ_WRITE_TOKEN",
+        "E2B_API_KEY",
+        "E2B_CODEX_TEMPLATE",
         "ENCRYPTION_KEY",
+        "FIREWORKS_API_KEY",
         "GITHUB_CLIENT_SECRET",
         "JWE_SECRET",
         "KV_REST_API_READ_ONLY_TOKEN",

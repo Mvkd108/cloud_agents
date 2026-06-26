@@ -47,3 +47,14 @@ export {
   type VercelSandboxConnectConfig,
   type VercelState,
 } from "./vercel/index.ts";
+
+// e2b
+export {
+  connectE2B,
+  E2BSandbox,
+  type E2BCodexProviderConfig,
+  type E2BSandboxConfig,
+  type E2BSandboxConnectConfig,
+  type E2BState,
+  type E2BStreamingCommandOptions,
+} from "./e2b/index.ts";

@@ -1,5 +1,7 @@
 import type { Sandbox, SandboxHooks } from "./interface.ts";
 import type { SandboxStatus } from "./types.ts";
+import { connectE2B } from "./e2b/connect.ts";
+import type { E2BState } from "./e2b/state.ts";
 import { connectVercel } from "./vercel/connect.ts";
 import type { VercelState } from "./vercel/state.ts";
 
@@ -10,7 +12,9 @@ export type { SandboxStatus };
  * Unified sandbox state type.
  * Use `type` discriminator to determine which sandbox implementation to use.
  */
-export type SandboxState = { type: "vercel" } & VercelState;
+export type SandboxState =
+  | ({ type: "vercel" } & VercelState)
+  | ({ type: "e2b" } & E2BState);
 
 /**
  * Base connect options for all sandbox types.
@@ -50,7 +54,7 @@ export interface ConnectOptions {
  * Configuration for connecting to a sandbox.
  */
 export type SandboxConnectConfig = {
-  state: { type: "vercel" } & VercelState;
+  state: SandboxState;
   options?: ConnectOptions;
 };
 
@@ -69,9 +73,15 @@ export async function connectSandbox(
 
   if (isNewApi) {
     const config = configOrState as SandboxConnectConfig;
+    if (config.state.type === "e2b") {
+      return connectE2B(config.state, config.options);
+    }
     return connectVercel(config.state, config.options);
   }
 
   const state = configOrState as SandboxState;
+  if (state.type === "e2b") {
+    return connectE2B(state, legacyOptions);
+  }
   return connectVercel(state, legacyOptions);
 }

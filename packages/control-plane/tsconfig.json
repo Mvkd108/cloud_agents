@@ -1,0 +1,7 @@
+{
+  "extends": "@open-agents/tsconfig/bun.json",
+  "compilerOptions": {
+    "types": ["bun", "node"]
+  },
+  "include": ["**/*.ts"]
+}
