@@ -48,6 +48,9 @@ importers:
       '@open-agents/control-plane':
         specifier: workspace:*
         version: link:../../packages/control-plane
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       tsx:
         specifier: ^4.22.4
         version: 4.22.4
@@ -257,6 +260,9 @@ importers:
       '@open-agents/control-plane':
         specifier: workspace:*
         version: link:../../packages/control-plane
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       tsx:
         specifier: ^4.22.4
         version: 4.22.4
