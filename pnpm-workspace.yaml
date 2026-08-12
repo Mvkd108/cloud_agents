@@ -6,6 +6,7 @@ catalog:
   ai: ^6.0.165
   "@ai-sdk/anthropic": ^3.0.70
   "@ai-sdk/openai": ^3.0.53
+  "@ai-sdk/openai-compatible": ^2.0.48
   "@ai-sdk/react": ^3.0.167
   zod: ^4.3.6
 

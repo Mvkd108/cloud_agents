@@ -12,6 +12,9 @@ catalogs:
     '@ai-sdk/openai':
       specifier: ^3.0.53
       version: 3.0.67
+    '@ai-sdk/openai-compatible':
+      specifier: ^2.0.48
+      version: 2.0.48
     '@ai-sdk/react':
       specifier: ^3.0.167
       version: 3.0.196
@@ -285,6 +288,9 @@ importers:
       '@ai-sdk/openai':
         specifier: 'catalog:'
         version: 3.0.67(zod@4.4.3)
+      '@ai-sdk/openai-compatible':
+        specifier: 'catalog:'
+        version: 2.0.48(zod@4.4.3)
       '@open-agents/sandbox':
         specifier: workspace:*
         version: link:../sandbox
@@ -6004,7 +6010,6 @@ snapshots:
       '@ai-sdk/provider': 3.0.10
       '@ai-sdk/provider-utils': 4.0.27(zod@4.4.3)
       zod: 4.4.3
-    optional: true
 
   '@ai-sdk/openai@3.0.67(zod@4.4.3)':
     dependencies:
