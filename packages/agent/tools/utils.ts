@@ -24,12 +24,13 @@ export function isPathWithinDirectory(
   filePath: string,
   directory: string,
 ): boolean {
-  const resolvedDir = path.resolve(directory);
-  const resolvedPath = path.isAbsolute(filePath)
-    ? path.resolve(filePath)
-    : path.resolve(resolvedDir, filePath);
+  const pathApi = path.posix.isAbsolute(directory) ? path.posix : path;
+  const resolvedDir = pathApi.resolve(directory);
+  const resolvedPath = pathApi.isAbsolute(filePath)
+    ? pathApi.resolve(filePath)
+    : pathApi.resolve(resolvedDir, filePath);
   return (
-    resolvedPath.startsWith(resolvedDir + path.sep) ||
+    resolvedPath.startsWith(resolvedDir + pathApi.sep) ||
     resolvedPath === resolvedDir
   );
 }
@@ -45,15 +46,16 @@ export function toDisplayPath(
   filePath: string,
   workingDirectory: string,
 ): string {
-  const absolutePath = path.isAbsolute(filePath)
-    ? path.resolve(filePath)
-    : path.resolve(workingDirectory, filePath);
+  const pathApi = path.posix.isAbsolute(workingDirectory) ? path.posix : path;
+  const absolutePath = pathApi.isAbsolute(filePath)
+    ? pathApi.resolve(filePath)
+    : pathApi.resolve(workingDirectory, filePath);
 
   if (!isPathWithinDirectory(absolutePath, workingDirectory)) {
     return absolutePath.replace(/\\/g, "/");
   }
 
-  const relativePath = path.relative(workingDirectory, absolutePath);
+  const relativePath = pathApi.relative(workingDirectory, absolutePath);
   if (relativePath === "") {
     return ".";
   }

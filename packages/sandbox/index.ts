@@ -1,6 +1,9 @@
 // interface
 export type {
   ExecResult,
+  DependencyInstallLockfileMode,
+  DependencyInstallResult,
+  JavaScriptPackageManager,
   Sandbox,
   SandboxHook,
   SandboxHooks,
@@ -15,6 +18,8 @@ export type { Source, FileEntry, SandboxStatus } from "./types.ts";
 // factory
 export {
   connectSandbox,
+  resolveSandboxProvider,
+  type SandboxProvider,
   type SandboxState,
   type ConnectOptions,
   type SandboxConnectConfig,
@@ -33,7 +38,7 @@ export {
   getFileModes,
   syncToRemote,
   syncToRemotePreservingChanges,
-  withTemporaryGitHubAuth,
+  execGitHubBrokered,
   type FileChange,
   type FileChangeStatus,
   type FileWithContent,

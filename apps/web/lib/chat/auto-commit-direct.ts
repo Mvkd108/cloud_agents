@@ -6,7 +6,6 @@ import {
   getStagedDiff,
   syncToRemote,
   syncToRemotePreservingChanges,
-  withTemporaryGitHubAuth,
 } from "@open-agents/sandbox";
 import { generateText } from "ai";
 import { gateway } from "@open-agents/agent";
@@ -116,9 +115,7 @@ export async function performAutoCommit(
       permissions: { contents: "read" },
     });
     try {
-      await withTemporaryGitHubAuth(sandbox, syncToken.token, () =>
-        syncToRemotePreservingChanges(sandbox, branch),
-      );
+      await syncToRemotePreservingChanges(sandbox, branch, syncToken.token);
     } finally {
       await revokeInstallationToken(syncToken.token);
     }
@@ -211,9 +208,7 @@ export async function performAutoCommit(
       permissions: { contents: "read" },
     });
     try {
-      await withTemporaryGitHubAuth(sandbox, syncToken.token, () =>
-        syncToRemote(sandbox, branch),
-      );
+      await syncToRemote(sandbox, branch, syncToken.token);
     } finally {
       await revokeInstallationToken(syncToken.token);
     }

@@ -1,12 +1,11 @@
 import type { SandboxState } from "@open-agents/sandbox";
 import { stepCountIs, ToolLoopAgent, type ToolSet } from "ai";
+import type { LanguageModelV3 } from "@ai-sdk/provider";
 import { z } from "zod";
 import { addCacheControl } from "./context-management";
-import {
-  type GatewayModelId,
-  gateway,
-  type ProviderOptionsByProvider,
-} from "./models";
+import { createModelProvider, type ModelProvider } from "./model-provider";
+import { applyModelMiddleware, type ProviderOptionsByProvider } from "./models";
+import { resolveProviderModelId } from "./resolve-provider-model-id";
 
 import type { SkillMetadata } from "./skills/types";
 import { buildSystemPrompt } from "./system-prompt";
@@ -16,6 +15,7 @@ import {
   editFileTool,
   globTool,
   grepTool,
+  installDependenciesTool,
   readFileTool,
   skillTool,
   taskTool,
@@ -25,11 +25,11 @@ import {
 } from "./tools";
 
 export interface AgentModelSelection {
-  id: GatewayModelId;
+  id: string;
   providerOptionsOverrides?: ProviderOptionsByProvider;
 }
 
-export type OpenAgentModelInput = GatewayModelId | AgentModelSelection;
+export type OpenAgentModelInput = string | AgentModelSelection;
 
 export interface AgentSandboxContext {
   state: SandboxState;
@@ -49,11 +49,10 @@ const callOptionsSchema = z.object({
 export type OpenAgentCallOptions = z.infer<typeof callOptionsSchema>;
 
 export const defaultModelLabel = "anthropic/claude-opus-4.6" as const;
-export const defaultModel = gateway(defaultModelLabel);
 
 function normalizeAgentModelSelection(
   selection: OpenAgentModelInput | undefined,
-  fallbackId: GatewayModelId,
+  fallbackId: string,
 ): AgentModelSelection {
   if (!selection) {
     return { id: fallbackId };
@@ -70,76 +69,124 @@ const tools = {
   grep: grepTool(),
   glob: globTool(),
   bash: bashTool(),
+  install_dependencies: installDependenciesTool,
   task: taskTool,
   ask_user_question: askUserQuestionTool,
   skill: skillTool,
   web_fetch: webFetchTool,
 } satisfies ToolSet;
 
-export const openAgent = new ToolLoopAgent({
-  model: defaultModel,
-  instructions: buildSystemPrompt({}),
-  tools,
-  stopWhen: stepCountIs(1),
-  callOptionsSchema,
-  prepareStep: ({ messages, model, steps: _steps }) => {
-    return {
-      messages: addCacheControl({
-        messages,
-        model,
-      }),
-    };
-  },
-  prepareCall: ({ options, ...settings }) => {
-    if (!options) {
-      throw new Error("Open Agent requires call options with sandbox.");
-    }
+export type ProviderResolver = (selectionId: string) => ModelProvider;
 
-    const mainSelection = normalizeAgentModelSelection(
-      options.model,
-      defaultModelLabel,
-    );
-    const subagentSelection = options.subagentModel
-      ? normalizeAgentModelSelection(options.subagentModel, defaultModelLabel)
-      : undefined;
+function buildVercelProvider(): ModelProvider {
+  return createModelProvider({ kind: "vercel-gateway" });
+}
 
-    const callModel = gateway(mainSelection.id, {
-      providerOptionsOverrides: mainSelection.providerOptionsOverrides,
-    });
-    const subagentModel = subagentSelection
-      ? gateway(subagentSelection.id, {
-          providerOptionsOverrides: subagentSelection.providerOptionsOverrides,
-        })
-      : undefined;
-    const customInstructions = options.customInstructions;
-    const sandbox = options.sandbox;
-    const skills = options.skills ?? [];
+function resolveModel(
+  selectionId: string,
+  resolveProvider: ProviderResolver,
+  providerOptionsOverrides?: ProviderOptionsByProvider,
+): LanguageModelV3 {
+  const { providerModelId } = resolveProviderModelId(selectionId);
+  const provider = resolveProvider(selectionId);
+  let model = provider.languageModel(providerModelId);
+  return applyModelMiddleware(model, selectionId, providerOptionsOverrides);
+}
 
-    const instructions = buildSystemPrompt({
-      cwd: sandbox.workingDirectory,
-      currentBranch: sandbox.currentBranch,
-      customInstructions,
-      environmentDetails: sandbox.environmentDetails,
-      skills,
-      modelId: mainSelection.id,
-    });
+export function createOpenAgent(resolveProvider?: ProviderResolver) {
+  const resolve = resolveProvider ?? buildVercelProvider;
 
-    return {
-      ...settings,
-      model: callModel,
-      tools: addCacheControl({
-        tools: settings.tools ?? tools,
-        model: callModel,
-      }),
-      instructions,
-      experimental_context: {
-        sandbox,
+  return new ToolLoopAgent({
+    model: resolveModel(defaultModelLabel, resolve),
+    instructions: buildSystemPrompt({}),
+    tools,
+    stopWhen: stepCountIs(1),
+    callOptionsSchema,
+    prepareStep: ({ messages, model, steps: _steps }) => {
+      return {
+        messages: addCacheControl({
+          messages,
+          model,
+        }),
+      };
+    },
+    prepareCall: ({ options, ...settings }) => {
+      if (!options) {
+        throw new Error("Open Agent requires call options with sandbox.");
+      }
+
+      const mainSelection = normalizeAgentModelSelection(
+        options.model,
+        defaultModelLabel,
+      );
+      const subagentSelection = options.subagentModel
+        ? normalizeAgentModelSelection(options.subagentModel, defaultModelLabel)
+        : undefined;
+
+      const callModel = resolveModel(
+        mainSelection.id,
+        resolve,
+        mainSelection.providerOptionsOverrides,
+      );
+
+      let subagentModel: LanguageModelV3 | undefined;
+      if (subagentSelection) {
+        const mainProviderRef = resolveProviderModelId(
+          mainSelection.id,
+        ).providerRef;
+        const subProviderRef = resolveProviderModelId(
+          subagentSelection.id,
+        ).providerRef;
+
+        if (mainProviderRef !== subProviderRef) {
+          throw new Error(
+            `Main agent provider "${mainProviderRef}" does not match subagent provider "${subProviderRef}". ` +
+              `Main and subagent must use the same provider.`,
+          );
+        }
+
+        subagentModel = resolveModel(
+          subagentSelection.id,
+          resolve,
+          subagentSelection.providerOptionsOverrides,
+        );
+      }
+
+      const customInstructions = options.customInstructions;
+      const sandbox = options.sandbox;
+      const skills = options.skills ?? [];
+
+      const instructions = buildSystemPrompt({
+        cwd: sandbox.workingDirectory,
+        currentBranch: sandbox.currentBranch,
+        customInstructions,
+        environmentDetails: sandbox.environmentDetails,
         skills,
-        model: callModel,
-        subagentModel,
-      },
-    };
-  },
-});
+        modelId: mainSelection.id,
+      });
 
+      return {
+        ...settings,
+        model: callModel,
+        tools: addCacheControl({
+          tools: settings.tools ?? tools,
+          model: callModel,
+        }),
+        instructions,
+        experimental_context: {
+          sandbox,
+          skills,
+          model: callModel,
+          subagentModel,
+        },
+      };
+    },
+  });
+}
+
+export const defaultModel = resolveModel(
+  defaultModelLabel,
+  buildVercelProvider,
+);
+export const openAgent = createOpenAgent();
 export type OpenAgent = typeof openAgent;

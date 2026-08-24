@@ -1,11 +1,30 @@
-export { type GatewayConfig, type GatewayOptions, gateway } from "./models";
+export { applyModelMiddleware, gateway } from "./models";
+export type {
+  ModelProvider,
+  ModelProviderConfig,
+  ModelProviderKind,
+  NormalizedModelProviderError,
+  NormalizedModelProviderErrorCode,
+} from "./model-provider";
+export {
+  createModelProvider,
+  normalizeModelProviderError,
+} from "./model-provider";
+export {
+  createOpenAgent,
+  defaultModel,
+  defaultModelLabel,
+  openAgent,
+} from "./open-agent";
 export type {
   AgentModelSelection,
   AgentSandboxContext,
   OpenAgentCallOptions,
   OpenAgentModelInput,
+  ProviderResolver,
 } from "./open-agent";
-export { defaultModel, defaultModelLabel, openAgent } from "./open-agent";
+export { resolveProviderModelId } from "./resolve-provider-model-id";
+export type { ProviderModelId } from "./resolve-provider-model-id";
 // Skills exports
 export { discoverSkills, parseSkillFrontmatter } from "./skills/discovery";
 export { extractSkillBody, substituteArguments } from "./skills/loader";

@@ -37,7 +37,7 @@ type MockSessionState = {
 
 const createCalls: Array<Record<string, unknown>> = [];
 const getCalls: Array<Record<string, unknown>> = [];
-const updateNetworkPolicyCalls: Array<Record<string, unknown>> = [];
+const updateNetworkPolicyCalls: unknown[] = [];
 const runCommandCalls: MockRunCommandParams[] = [];
 const writeFilesCalls: Array<{ path: string; content: Buffer }[]> = [];
 let readFileToBufferResult: Buffer | null = Buffer.from("");
@@ -118,7 +118,7 @@ function createMockSandboxSdk(name: string) {
       lastRunCommandEnv = params.env;
       return runCommandMock(params);
     },
-    updateNetworkPolicy: async (policy: Record<string, unknown>) => {
+    updateNetworkPolicy: async (policy: unknown) => {
       updateNetworkPolicyCalls.push(policy);
     },
     writeFiles: async (files: { path: string; content: Buffer }[]) => {
@@ -186,7 +186,7 @@ describe("VercelSandbox.environmentDetails", () => {
 
     const details = sandbox.environmentDetails;
 
-    expect(details).toContain("This snapshot includes agent-browser");
+    expect(details).not.toContain("agent-browser");
     expect(details).toContain("Dev server URLs for locally running servers");
     expect(details).toContain("Port 3000: https://sbx-3000.vercel.run");
     expect(details).not.toContain("Port 5173:");
@@ -418,7 +418,6 @@ describe("GitHub setup credential brokering", () => {
             ],
           },
         ],
-        "*": [],
       },
     });
     expect(createCalls[0]?.source).toEqual({
@@ -426,7 +425,7 @@ describe("GitHub setup credential brokering", () => {
       url: "https://github.com/open-agents/example",
       revision: "main",
     });
-    expect(updateNetworkPolicyCalls).toEqual([{ allow: { "*": [] } }]);
+    expect(updateNetworkPolicyCalls).toEqual(["deny-all"]);
   });
 
   test("clears GitHub auth when reconnecting to a sandbox", async () => {
@@ -435,7 +434,7 @@ describe("GitHub setup credential brokering", () => {
       remainingTimeout: 0,
     });
 
-    expect(updateNetworkPolicyCalls).toEqual([{ allow: { "*": [] } }]);
+    expect(updateNetworkPolicyCalls).toEqual(["deny-all"]);
   });
 });
 
@@ -457,6 +456,10 @@ describe("VercelSandbox.create", () => {
     expect(runCommandCalls[0]).toEqual({
       cmd: "git",
       args: [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "credential.helper=",
         "clone",
         "--branch",
         "main",
@@ -464,7 +467,14 @@ describe("VercelSandbox.create", () => {
         ".",
       ],
       cwd: "/vercel/sandbox",
+      env: { GIT_TERMINAL_PROMPT: "0" },
     });
+  });
+
+  test("starts ordinary workspaces with deny-all networking", async () => {
+    await sandboxModule.VercelSandbox.create({ baseSnapshotId: "snap-base-1" });
+
+    expect(createCalls[0]?.networkPolicy).toBe("deny-all");
   });
 
   test("creates empty git repo from base snapshot", async () => {
@@ -496,6 +506,103 @@ describe("VercelSandbox.create", () => {
       snapshotId: "snap-base-1",
     });
     expect(runCommandCalls.filter((c) => c.cmd === "git")).toEqual([]);
+  });
+});
+
+describe("VercelSandbox network isolation", () => {
+  test("temporarily allows the npm registry and restores deny-all after install", async () => {
+    const sandbox = await sandboxModule.VercelSandbox.connect("sbx-test", {
+      remainingTimeout: 0,
+    });
+
+    const result = await sandbox.installDependencies(
+      "/vercel/sandbox",
+      "frozen",
+    );
+
+    expect(result).toMatchObject({ success: true, packageManager: "pnpm" });
+    expect(updateNetworkPolicyCalls).toEqual([
+      "deny-all",
+      { allow: ["registry.npmjs.org"] },
+      "deny-all",
+    ]);
+    expect(runCommandCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          cmd: "bash",
+          args: [
+            "-c",
+            'cd "/vercel/sandbox" && pnpm install --frozen-lockfile',
+          ],
+        }),
+      ]),
+    );
+  });
+
+  test("restores deny-all when dependency installation is cancelled", async () => {
+    runCommandMock = async (params) => {
+      if (params?.cmd === "bash") {
+        const error = new Error("cancelled");
+        error.name = "AbortError";
+        throw error;
+      }
+      return {
+        exitCode: 0,
+        cmdId: "cmd-1",
+        stdout: async () => "",
+        stderr: async () => "",
+      };
+    };
+    const sandbox = await sandboxModule.VercelSandbox.connect("sbx-test", {
+      remainingTimeout: 0,
+    });
+
+    await expect(
+      sandbox.installDependencies("/vercel/sandbox", "frozen"),
+    ).rejects.toThrow("cancelled");
+    expect(updateNetworkPolicyCalls.at(-1)).toBe("deny-all");
+  });
+
+  test("restores deny-all when dependency installation fails", async () => {
+    runCommandMock = async (params) => ({
+      exitCode: params?.cmd === "test" ? 1 : 0,
+      cmdId: "cmd-1",
+      stdout: async () => "",
+      stderr: async () => "",
+    });
+    const sandbox = await sandboxModule.VercelSandbox.connect("sbx-test", {
+      remainingTimeout: 0,
+    });
+
+    await expect(
+      sandbox.installDependencies("/vercel/sandbox", "frozen"),
+    ).rejects.toThrow("No supported JavaScript lockfile found");
+    expect(updateNetworkPolicyCalls).toEqual([
+      "deny-all",
+      { allow: ["registry.npmjs.org"] },
+      "deny-all",
+    ]);
+  });
+
+  test("brokers a token only through policy transforms and restores deny-all", async () => {
+    const token = "github-secret-token";
+    const sandbox = await sandboxModule.VercelSandbox.connect("sbx-test", {
+      remainingTimeout: 0,
+    });
+
+    const result = await sandbox.execGitHubBrokered(
+      "git fetch origin main",
+      "/vercel/sandbox",
+      30_000,
+      token,
+    );
+
+    expect(result.success).toBe(true);
+    expect(JSON.stringify(runCommandCalls)).not.toContain(token);
+    expect(result.stdout).not.toContain(token);
+    expect(result.stderr).not.toContain(token);
+    expect(updateNetworkPolicyCalls.at(-1)).toBe("deny-all");
+    expect(updateNetworkPolicyCalls[1]).not.toHaveProperty("allow.*");
   });
 });
 
@@ -532,6 +639,12 @@ describe("VercelSandbox.execDetached", () => {
       );
 
       expect(result).toEqual({ commandId: "cmd-detached-running" });
+      expect(updateNetworkPolicyCalls.at(-1)).toBe("deny-all");
+      await expect(
+        sandbox.installDependencies("/vercel/sandbox", "frozen"),
+      ).rejects.toThrow(
+        "Network-enabled operations are unavailable after starting a detached command",
+      );
     } finally {
       globalThis.setTimeout = originalSetTimeout;
     }

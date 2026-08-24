@@ -1,5 +1,10 @@
 # E2B + Fireworks Control Plane
 
+> **Experimental only.** This standalone API/worker path is not authenticated by
+> the web product, is not part of the supported deployment, and must not be
+> exposed publicly. The Reliable Cloud-Agent MVP uses `apps/web`, the existing
+> Open Agent, Vercel Workflow, and Vercel Sandbox exclusively.
+
 This fork keeps the Open Agents web product shell and adds a separate control
 plane for E2B-hosted Codex runs.
 

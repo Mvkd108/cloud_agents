@@ -72,6 +72,13 @@ export interface ExecResult {
   truncated: boolean;
 }
 
+export type DependencyInstallLockfileMode = "frozen" | "update";
+export type JavaScriptPackageManager = "bun" | "npm" | "pnpm" | "yarn";
+
+export interface DependencyInstallResult extends ExecResult {
+  packageManager: JavaScriptPackageManager;
+}
+
 /**
  * Sandbox interface for file system and shell operations.
  */
@@ -142,10 +149,25 @@ export interface Sandbox {
   execDetached?(command: string, cwd: string): Promise<{ commandId: string }>;
 
   /**
-   * Temporarily update GitHub credential brokering for trusted broker work.
-   * Callers must clear the token as soon as the trusted operation completes.
+   * Install JavaScript dependencies through a narrowly allowlisted registry
+   * policy. Implementations must restore deny-all egress after the operation.
    */
-  setGitHubAuthToken?(token?: string): Promise<void>;
+  installDependencies?(
+    cwd: string,
+    lockfileMode: DependencyInstallLockfileMode,
+    options?: { signal?: AbortSignal },
+  ): Promise<DependencyInstallResult>;
+
+  /**
+   * Run one trusted GitHub network command with short-lived credential
+   * brokering. The token must never be added to the command or environment.
+   */
+  execGitHubBrokered?(
+    command: string,
+    cwd: string,
+    timeoutMs: number,
+    token: string,
+  ): Promise<ExecResult>;
 
   /**
    * Get the public URL for an exposed port.

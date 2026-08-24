@@ -36,6 +36,27 @@ function exec(
   return sandbox.exec(command, sandbox.workingDirectory, timeoutMs);
 }
 
+const GIT_NETWORK_COMMAND_PREFIX =
+  "GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null GIT_CONFIG_KEY_1=credential.helper GIT_CONFIG_VALUE_1= GIT_TERMINAL_PROMPT=0";
+
+export async function execGitHubBrokered(
+  sandbox: Sandbox,
+  token: string,
+  command: string,
+  timeoutMs = 30000,
+): Promise<ExecResult> {
+  if (!sandbox.execGitHubBrokered) {
+    throw new Error("Sandbox does not support trusted GitHub brokering");
+  }
+
+  return sandbox.execGitHubBrokered(
+    `${GIT_NETWORK_COMMAND_PREFIX} ${command}`,
+    sandbox.workingDirectory,
+    timeoutMs,
+    token,
+  );
+}
+
 function commandOutput(result: ExecResult): string {
   return result.stderr?.trim() || result.stdout?.trim() || "Git command failed";
 }
@@ -48,12 +69,12 @@ function isMissingRemoteRef(result: ExecResult): boolean {
 async function fetchRemoteBranch(
   sandbox: Sandbox,
   branch: string,
+  token?: string,
 ): Promise<"fetched" | "missing"> {
-  const fetchResult = await exec(
-    sandbox,
-    `GIT_TERMINAL_PROMPT=0 git fetch --force origin ${branch}:refs/remotes/origin/${branch}`,
-    30000,
-  );
+  const command = `git fetch --force origin ${branch}:refs/remotes/origin/${branch}`;
+  const fetchResult = token
+    ? await execGitHubBrokered(sandbox, token, command, 30000)
+    : await exec(sandbox, `${GIT_NETWORK_COMMAND_PREFIX} ${command}`, 30000);
 
   if (fetchResult.success) {
     return "fetched";
@@ -326,12 +347,13 @@ export async function getFileModes(
 export async function syncToRemote(
   sandbox: Sandbox,
   branch: string,
+  token?: string,
 ): Promise<void> {
   if (!isSafeBranchName(branch)) {
     throw new Error("Invalid branch name");
   }
 
-  const fetchStatus = await fetchRemoteBranch(sandbox, branch);
+  const fetchStatus = await fetchRemoteBranch(sandbox, branch, token);
   if (fetchStatus === "missing") {
     throw new Error(`Remote branch '${branch}' not found`);
   }
@@ -347,12 +369,13 @@ export async function syncToRemote(
 export async function syncToRemotePreservingChanges(
   sandbox: Sandbox,
   branch: string,
+  token?: string,
 ): Promise<void> {
   if (!isSafeBranchName(branch)) {
     throw new Error("Invalid branch name");
   }
 
-  const fetchStatus = await fetchRemoteBranch(sandbox, branch);
+  const fetchStatus = await fetchRemoteBranch(sandbox, branch, token);
   if (fetchStatus === "missing") {
     return;
   }
@@ -404,26 +427,5 @@ export async function syncToRemotePreservingChanges(
     throw new Error(
       `Failed to restore local changes after syncing remote branch: ${commandOutput(popResult)}`,
     );
-  }
-}
-
-export async function withTemporaryGitHubAuth<T>(
-  sandbox: Sandbox,
-  token: string | undefined,
-  operation: () => Promise<T>,
-): Promise<T> {
-  if (!token) {
-    return operation();
-  }
-
-  if (!sandbox.setGitHubAuthToken) {
-    throw new Error("Sandbox does not support temporary GitHub auth");
-  }
-
-  await sandbox.setGitHubAuthToken(token);
-  try {
-    return await operation();
-  } finally {
-    await sandbox.setGitHubAuthToken(undefined);
   }
 }

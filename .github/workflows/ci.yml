@@ -1,19 +1,30 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
-    branches: ["*"]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  lint-and-typecheck:
-    runs-on: ubuntu-latest
+  ci:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -26,19 +37,10 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.2.14"
+          bun-version: "1.3.14"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint and format check
-        run: pnpm check
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Test
-        run: pnpm test:isolated
-
-      - name: DB Check
-        run: pnpm --dir apps/web db:check
+      - name: CI
+        run: pnpm run ci

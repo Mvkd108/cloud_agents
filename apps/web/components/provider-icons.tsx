@@ -276,9 +276,16 @@ const providerLabelPrefixes: Record<string, string[]> = {
 };
 
 export function getProviderFromModelId(modelId: string): string {
-  const slashIndex = modelId.indexOf("/");
-  if (slashIndex === -1) return modelId;
-  return modelId.slice(0, slashIndex);
+  const colonIdx = modelId.indexOf(":");
+  const effectiveId = colonIdx !== -1 ? modelId.slice(colonIdx + 1) : modelId;
+
+  if (colonIdx !== -1) {
+    return modelId.slice(0, colonIdx);
+  }
+
+  const slashIndex = effectiveId.indexOf("/");
+  if (slashIndex === -1) return effectiveId;
+  return effectiveId.slice(0, slashIndex);
 }
 
 /**

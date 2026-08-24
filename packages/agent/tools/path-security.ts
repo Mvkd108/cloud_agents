@@ -11,9 +11,10 @@ export function resolveWorkspacePath(
   filePath: string,
   workingDirectory: string,
 ): string | null {
-  const absolutePath = path.isAbsolute(filePath)
-    ? path.resolve(filePath)
-    : path.resolve(workingDirectory, filePath);
+  const pathApi = path.posix.isAbsolute(workingDirectory) ? path.posix : path;
+  const absolutePath = pathApi.isAbsolute(filePath)
+    ? pathApi.resolve(filePath)
+    : pathApi.resolve(workingDirectory, filePath);
 
   return isPathWithinDirectory(absolutePath, workingDirectory)
     ? absolutePath

@@ -1,7 +1,14 @@
-import { Sandbox as VercelSandboxSDK } from "@vercel/sandbox";
+import {
+  Sandbox as VercelSandboxSDK,
+  type NetworkPolicy,
+} from "@vercel/sandbox";
+import * as path from "node:path";
 import type { Dirent } from "fs";
 import type {
   ExecResult,
+  DependencyInstallLockfileMode,
+  DependencyInstallResult,
+  JavaScriptPackageManager,
   Sandbox,
   SandboxHooks,
   SandboxStats,
@@ -13,6 +20,11 @@ import type {
   VercelSandboxConnectConfig,
 } from "./config.ts";
 import type { VercelState } from "./state.ts";
+import {
+  buildGitHubCredentialBrokeringPolicy,
+  buildNpmRegistryNetworkPolicy,
+  DENY_ALL_NETWORK_POLICY,
+} from "./network-policy.ts";
 
 const MAX_OUTPUT_LENGTH = 50_000;
 const DEFAULT_WORKING_DIRECTORY = "/vercel/sandbox";
@@ -26,72 +38,13 @@ interface SandboxRouteLike {
   port: number;
 }
 
-interface SandboxNetworkTransform {
-  headers?: Record<string, string>;
-}
-
-interface SandboxNetworkRule {
-  transform?: SandboxNetworkTransform[];
-}
-
-interface SandboxNetworkPolicy {
-  allow: Record<string, SandboxNetworkRule[]>;
-}
-
-const DEFAULT_NETWORK_POLICY: SandboxNetworkPolicy = {
-  allow: {
-    "*": [],
-  },
-};
-
-function buildGitHubCredentialBrokeringPolicy(
-  token?: string,
-): SandboxNetworkPolicy {
-  if (!token) {
-    return DEFAULT_NETWORK_POLICY;
-  }
-
-  const basicAuthToken = Buffer.from(
-    `x-access-token:${token}`,
-    "utf-8",
-  ).toString("base64");
-
-  return {
-    allow: {
-      "api.github.com": [
-        {
-          transform: [{ headers: { Authorization: `Bearer ${token}` } }],
-        },
-      ],
-      "uploads.github.com": [
-        {
-          transform: [{ headers: { Authorization: `Bearer ${token}` } }],
-        },
-      ],
-      "codeload.github.com": [
-        {
-          transform: [{ headers: { Authorization: `Bearer ${token}` } }],
-        },
-      ],
-      "github.com": [
-        {
-          transform: [
-            { headers: { Authorization: `Basic ${basicAuthToken}` } },
-          ],
-        },
-      ],
-      "*": [],
-    },
-  };
-}
-
 async function syncGitHubCredentialBrokering(
   sdk: VercelSandboxSDK,
   token?: string,
 ): Promise<void> {
   const updateNetworkPolicy = (
     sdk as VercelSandboxSDK & {
-      updateNetworkPolicy?: (policy: SandboxNetworkPolicy) => Promise<void>;
+      updateNetworkPolicy?: (policy: NetworkPolicy) => Promise<unknown>;
     }
   ).updateNetworkPolicy;
 
@@ -121,8 +74,11 @@ async function clearGitHubCredentialBrokeringBestEffort(
 ): Promise<void> {
   try {
     await clearGitHubCredentialBrokering(sdk);
-  } catch (error) {
-    console.warn("[VercelSandbox] failed to clear GitHub setup auth:", error);
+  } catch {
+    await sdk.stop().catch(() => {});
+    throw new Error(
+      "Failed to remove temporary GitHub access; the sandbox was stopped",
+    );
   }
 }
 
@@ -199,6 +155,63 @@ export class VercelSandbox implements Sandbox {
   private _expiresAt?: number;
   private _timeout?: number;
   private _ports?: number[];
+  private networkOperation?: "dependencies" | "github" | "detached";
+  private hasDetachedCommand = false;
+
+  private async updateNetworkPolicy(policy: NetworkPolicy): Promise<void> {
+    if (typeof this.sdk.updateNetworkPolicy !== "function") {
+      throw new Error(
+        "Current @vercel/sandbox SDK does not support required network policy updates",
+      );
+    }
+
+    await this.sdk.updateNetworkPolicy(policy);
+  }
+
+  private async runWithNetworkPolicy<T>(params: {
+    kind: "dependencies" | "github";
+    policy: NetworkPolicy;
+    operation: () => Promise<T>;
+  }): Promise<T> {
+    if (this.networkOperation) {
+      throw new Error("Another sandbox network operation is already active");
+    }
+    if (this.hasDetachedCommand) {
+      throw new Error(
+        "Network-enabled operations are unavailable after starting a detached command",
+      );
+    }
+
+    this.networkOperation = params.kind;
+    let operationResult: { ok: true; value: T } | { ok: false; error: unknown };
+    try {
+      await this.updateNetworkPolicy(params.policy);
+      operationResult = { ok: true, value: await params.operation() };
+    } catch (error) {
+      operationResult = { ok: false, error };
+    }
+
+    let restorationFailed = false;
+    try {
+      await this.updateNetworkPolicy(DENY_ALL_NETWORK_POLICY);
+    } catch {
+      restorationFailed = true;
+      await this.sdk.stop().catch(() => {});
+      this.isStopped = true;
+    }
+    this.networkOperation = undefined;
+
+    if (restorationFailed) {
+      throw new Error(
+        "Failed to restore deny-all networking; the sandbox was stopped",
+      );
+    }
+    if (!operationResult.ok) {
+      throw operationResult.error;
+    }
+
+    return operationResult.value;
+  }
 
   /**
    * Timestamp (ms since epoch) when this sandbox will be proactively stopped.
@@ -378,6 +391,88 @@ export class VercelSandbox implements Sandbox {
     return { expiresAt: this._expiresAt };
   }
 
+  async installDependencies(
+    cwd: string,
+    lockfileMode: DependencyInstallLockfileMode,
+    options?: { signal?: AbortSignal },
+  ): Promise<DependencyInstallResult> {
+    const resolvedCwd = path.posix.resolve(this.workingDirectory, cwd);
+    const relativeCwd = path.posix.relative(this.workingDirectory, resolvedCwd);
+    if (relativeCwd.startsWith("..") || path.posix.isAbsolute(relativeCwd)) {
+      throw new Error("Dependency installation must stay inside the workspace");
+    }
+
+    return this.runWithNetworkPolicy({
+      kind: "dependencies",
+      policy: buildNpmRegistryNetworkPolicy(),
+      operation: async () => {
+        const candidates: Array<{
+          lockfiles: string[];
+          packageManager: JavaScriptPackageManager;
+          frozenCommand: string;
+          updateCommand: string;
+        }> = [
+          {
+            lockfiles: ["pnpm-lock.yaml"],
+            packageManager: "pnpm",
+            frozenCommand: "pnpm install --frozen-lockfile",
+            updateCommand: "pnpm install",
+          },
+          {
+            lockfiles: ["bun.lock", "bun.lockb"],
+            packageManager: "bun",
+            frozenCommand: "bun install --frozen-lockfile",
+            updateCommand: "bun install",
+          },
+          {
+            lockfiles: ["yarn.lock"],
+            packageManager: "yarn",
+            frozenCommand: "yarn install --frozen-lockfile",
+            updateCommand: "yarn install",
+          },
+          {
+            lockfiles: ["package-lock.json", "npm-shrinkwrap.json"],
+            packageManager: "npm",
+            frozenCommand: "npm ci",
+            updateCommand: "npm install",
+          },
+        ];
+
+        let selected: (typeof candidates)[number] | undefined;
+        for (const candidate of candidates) {
+          for (const lockfile of candidate.lockfiles) {
+            try {
+              await this.access(path.posix.join(resolvedCwd, lockfile));
+              selected = candidate;
+              break;
+            } catch {
+              // Try the next supported lockfile.
+            }
+          }
+          if (selected) break;
+        }
+
+        if (!selected) {
+          throw new Error(
+            "No supported JavaScript lockfile found (pnpm, Bun, Yarn, or npm)",
+          );
+        }
+
+        const command =
+          lockfileMode === "update"
+            ? selected.updateCommand
+            : selected.frozenCommand;
+        const result = await this.executeCommand(
+          command,
+          resolvedCwd,
+          10 * 60_000,
+          { signal: options?.signal },
+        );
+        return { ...result, packageManager: selected.packageManager };
+      },
+    });
+  }
+
   /**
    * The base host/domain for this sandbox (e.g., "abc123.vercel.run").
    * To get the full URL for an exposed port, use the `domain(port)` method
@@ -442,8 +537,7 @@ export class VercelSandbox implements Sandbox {
 - GitHub writes are handled by the broker outside this sandbox. Do not configure credentials, commit, or push from inside the sandbox.
 - Node.js runtime with npm/pnpm available
 - Bun and jq are preinstalled
-- Dependencies may not be installed. Before running project scripts (build, typecheck, lint, test), check if \`node_modules\` exists and run the package manager install command if needed (e.g. \`bun install\`, \`npm install\`)
-- This snapshot includes agent-browser; when validating UI or end-to-end behavior, start the dev server and use agent-browser against the local dev server URL
+- Dependencies may not be installed. Use the dedicated dependency installation tool when setup is required; general bash commands do not receive network access
 - This sandbox already runs on Vercel; do not suggest deploying to Vercel just to obtain a shareable preview link
 ${hostLine}${portLines}${runtimeEnvLine}`;
   }
@@ -574,101 +668,108 @@ ${hostLine}${portLines}${runtimeEnvLine}`;
     }
 
     const workingDirectory = DEFAULT_WORKING_DIRECTORY;
-
-    // TODO: `git clone ... .` requires the directory to be empty. If the base
-    // snapshot has files in /vercel/sandbox (dotfiles, tool configs, etc.), the
-    // clone will fail. Consider using git init + remote add + fetch + checkout
-    // instead, which works regardless of existing directory contents.
-    if (source && baseSnapshotId) {
-      const cloneArgs = ["clone"];
-      if (source.branch) {
-        cloneArgs.push("--branch", source.branch);
-      }
-      cloneArgs.push(source.url, ".");
-
-      const cloneResult = await sdk.runCommand({
-        cmd: "git",
-        args: cloneArgs,
-        cwd: workingDirectory,
-      });
-
-      if (cloneResult.exitCode !== 0) {
-        if (githubToken) {
-          await clearGitHubCredentialBrokeringBestEffort(sdk);
-        }
-        throw new Error(
-          `Failed to clone repository '${source.url}' (exit code ${cloneResult.exitCode})`,
-        );
-      }
-    }
-
-    // Initialize git repo for empty sandboxes (no source provided)
-    // This ensures git commands work consistently (e.g., for diff viewing)
-    if (!source && !restoreSnapshotId && !skipGitWorkspaceBootstrap) {
-      await sdk.runCommand({
-        cmd: "git",
-        args: ["init"],
-        cwd: workingDirectory,
-      });
-    }
-
-    // Configure git user for commits if provided (skip when no repo was created)
-    if (gitUser && (source || !skipGitWorkspaceBootstrap)) {
-      await sdk.runCommand({
-        cmd: "git",
-        args: ["config", "user.name", gitUser.name],
-        cwd: workingDirectory,
-      });
-      await sdk.runCommand({
-        cmd: "git",
-        args: ["config", "user.email", gitUser.email],
-        cwd: workingDirectory,
-      });
-    }
-
-    // Create initial empty commit for empty sandboxes so HEAD exists
-    // This is required for git diff HEAD to work (e.g., diff viewer)
-    // Must be done after gitUser config since git commit requires user info
-    if (
-      !source &&
-      !restoreSnapshotId &&
-      gitUser &&
-      !skipGitWorkspaceBootstrap
-    ) {
-      await sdk.runCommand({
-        cmd: "git",
-        args: ["commit", "--allow-empty", "-m", "Initial commit"],
-        cwd: workingDirectory,
-      });
-    }
-
-    // Track the current branch
     let currentBranch: string | undefined;
 
-    // Create and checkout a new branch if specified
-    if (source?.newBranch) {
-      const checkoutResult = await sdk.runCommand({
-        cmd: "git",
-        args: ["checkout", "-b", source.newBranch],
-        cwd: workingDirectory,
-      });
-
-      if (checkoutResult.exitCode !== 0) {
-        if (githubToken) {
-          await clearGitHubCredentialBrokeringBestEffort(sdk);
+    try {
+      // TODO: `git clone ... .` requires the directory to be empty. If the base
+      // snapshot has files in /vercel/sandbox (dotfiles, tool configs, etc.), the
+      // clone will fail. Consider using git init + remote add + fetch + checkout
+      // instead, which works regardless of existing directory contents.
+      if (source && baseSnapshotId) {
+        const cloneArgs = [
+          "-c",
+          "core.hooksPath=/dev/null",
+          "-c",
+          "credential.helper=",
+          "clone",
+        ];
+        if (source.branch) {
+          cloneArgs.push("--branch", source.branch);
         }
-        throw new Error(
-          `Failed to create branch '${source.newBranch}': ${await checkoutResult.stderr()}`,
-        );
+        cloneArgs.push(source.url, ".");
+
+        const cloneResult = await sdk.runCommand({
+          cmd: "git",
+          args: cloneArgs,
+          cwd: workingDirectory,
+          env: { GIT_TERMINAL_PROMPT: "0" },
+        });
+
+        if (cloneResult.exitCode !== 0) {
+          throw new Error(
+            `Failed to clone repository '${source.url}' (exit code ${cloneResult.exitCode})`,
+          );
+        }
       }
 
-      currentBranch = source.newBranch;
-    } else if (source?.branch) {
-      currentBranch = source.branch;
-    }
+      // Initialize git repo for empty sandboxes (no source provided)
+      // This ensures git commands work consistently (e.g., for diff viewing)
+      if (!source && !restoreSnapshotId && !skipGitWorkspaceBootstrap) {
+        await sdk.runCommand({
+          cmd: "git",
+          args: ["init"],
+          cwd: workingDirectory,
+        });
+      }
 
-    if (githubToken) {
-      await clearGitHubCredentialBrokering(sdk);
+      // Configure git user for commits if provided (skip when no repo was created)
+      if (gitUser && (source || !skipGitWorkspaceBootstrap)) {
+        await sdk.runCommand({
+          cmd: "git",
+          args: ["config", "user.name", gitUser.name],
+          cwd: workingDirectory,
+        });
+        await sdk.runCommand({
+          cmd: "git",
+          args: ["config", "user.email", gitUser.email],
+          cwd: workingDirectory,
+        });
+      }
+
+      // Create initial empty commit for empty sandboxes so HEAD exists
+      // This is required for git diff HEAD to work (e.g., diff viewer)
+      // Must be done after gitUser config since git commit requires user info
+      if (
+        !source &&
+        !restoreSnapshotId &&
+        gitUser &&
+        !skipGitWorkspaceBootstrap
+      ) {
+        await sdk.runCommand({
+          cmd: "git",
+          args: ["commit", "--allow-empty", "-m", "Initial commit"],
+          cwd: workingDirectory,
+        });
+      }
+
+      // Create and checkout a new branch if specified
+      if (source?.newBranch) {
+        const checkoutResult = await sdk.runCommand({
+          cmd: "git",
+          args: [
+            "-c",
+            "core.hooksPath=/dev/null",
+            "checkout",
+            "-b",
+            source.newBranch,
+          ],
+          cwd: workingDirectory,
+        });
+
+        if (checkoutResult.exitCode !== 0) {
+          throw new Error(
+            `Failed to create branch '${source.newBranch}': ${await checkoutResult.stderr()}`,
+          );
+        }
+
+        currentBranch = source.newBranch;
+      } else if (source?.branch) {
+        currentBranch = source.branch;
+      }
+    } finally {
+      if (githubToken) {
+        await clearGitHubCredentialBrokeringBestEffort(sdk);
+      }
     }
 
     // Capture startTime AFTER all setup operations so users get their full timeout duration.
@@ -899,7 +1000,7 @@ ${hostLine}${portLines}${runtimeEnvLine}`;
     return entries;
   }
 
-  async exec(
+  private async executeCommand(
     command: string,
     cwd: string,
     timeoutMs: number,
@@ -957,6 +1058,26 @@ ${hostLine}${portLines}${runtimeEnvLine}`;
     }
   }
 
+  async exec(
+    command: string,
+    cwd: string,
+    timeoutMs: number,
+    options?: { signal?: AbortSignal },
+  ): Promise<ExecResult> {
+    if (this.networkOperation) {
+      return {
+        success: false,
+        exitCode: null,
+        stdout: "",
+        stderr:
+          "Command blocked while a trusted sandbox network operation is active",
+        truncated: false,
+      };
+    }
+
+    return this.executeCommand(command, cwd, timeoutMs, options);
+  }
+
   /**
    * Execute a command in detached mode (returns immediately).
    * The command continues running in the background.
@@ -965,53 +1086,66 @@ ${hostLine}${portLines}${runtimeEnvLine}`;
     command: string,
     cwd: string,
   ): Promise<{ commandId: string }> {
-    const result = await this.session.runCommand({
-      cmd: "bash",
-      args: ["-c", `cd "${cwd}" && ${command}`],
-      env: this.getCommandEnv(),
-      detached: true,
-    });
-
-    const abortController = new AbortController();
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutResult = new Promise<{ kind: "timeout" }>((resolve) => {
-      timeoutId = setTimeout(() => {
-        abortController.abort();
-        resolve({ kind: "timeout" });
-      }, DETACHED_QUICK_FAILURE_WINDOW_MS);
-    });
-
-    const waitResult = result
-      .wait({ signal: abortController.signal })
-      .then((finished) => ({ kind: "finished", finished }) as const)
-      .catch((error: unknown) => ({ kind: "error", error }) as const);
-
-    const quickProbe = await Promise.race([waitResult, timeoutResult]);
-
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-
-    if (quickProbe.kind === "timeout") {
-      return { commandId: result.cmdId };
-    }
-
-    if (quickProbe.kind === "error") {
-      throw quickProbe.error;
-    }
-
-    if (quickProbe.finished.exitCode !== 0) {
-      const stderr = await quickProbe.finished.stderr();
-      const trimmedStderr = stderr.trim();
-      const stderrSnippet = trimmedStderr
-        ? trimmedStderr.slice(0, MAX_OUTPUT_LENGTH)
-        : "<no stderr>";
+    if (this.networkOperation) {
       throw new Error(
-        `Background command exited with code ${quickProbe.finished.exitCode}. stderr:\n${stderrSnippet}`,
+        "Detached commands cannot start during a sandbox network operation",
       );
     }
 
-    return { commandId: result.cmdId };
+    this.networkOperation = "detached";
+    try {
+      await this.updateNetworkPolicy(DENY_ALL_NETWORK_POLICY);
+      const result = await this.session.runCommand({
+        cmd: "bash",
+        args: ["-c", `cd "${cwd}" && ${command}`],
+        env: this.getCommandEnv(),
+        detached: true,
+      });
+
+      const abortController = new AbortController();
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const timeoutResult = new Promise<{ kind: "timeout" }>((resolve) => {
+        timeoutId = setTimeout(() => {
+          abortController.abort();
+          resolve({ kind: "timeout" });
+        }, DETACHED_QUICK_FAILURE_WINDOW_MS);
+      });
+
+      const waitResult = result
+        .wait({ signal: abortController.signal })
+        .then((finished) => ({ kind: "finished", finished }) as const)
+        .catch((error: unknown) => ({ kind: "error", error }) as const);
+
+      const quickProbe = await Promise.race([waitResult, timeoutResult]);
+
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+
+      if (quickProbe.kind === "timeout") {
+        this.hasDetachedCommand = true;
+        return { commandId: result.cmdId };
+      }
+
+      if (quickProbe.kind === "error") {
+        throw quickProbe.error;
+      }
+
+      if (quickProbe.finished.exitCode !== 0) {
+        const stderr = await quickProbe.finished.stderr();
+        const trimmedStderr = stderr.trim();
+        const stderrSnippet = trimmedStderr
+          ? trimmedStderr.slice(0, MAX_OUTPUT_LENGTH)
+          : "<no stderr>";
+        throw new Error(
+          `Background command exited with code ${quickProbe.finished.exitCode}. stderr:\n${stderrSnippet}`,
+        );
+      }
+
+      return { commandId: result.cmdId };
+    } finally {
+      this.networkOperation = undefined;
+    }
   }
 
   /**
@@ -1021,8 +1155,21 @@ ${hostLine}${portLines}${runtimeEnvLine}`;
     return this.session.domain(port);
   }
 
-  async setGitHubAuthToken(token?: string): Promise<void> {
-    await syncGitHubCredentialBrokering(this.sdk, token);
+  async execGitHubBrokered(
+    command: string,
+    cwd: string,
+    timeoutMs: number,
+    token: string,
+  ): Promise<ExecResult> {
+    if (!token) {
+      throw new Error("A short-lived GitHub token is required");
+    }
+
+    return this.runWithNetworkPolicy({
+      kind: "github",
+      policy: buildGitHubCredentialBrokeringPolicy(token),
+      operation: () => this.executeCommand(command, cwd, timeoutMs),
+    });
   }
 
   /**

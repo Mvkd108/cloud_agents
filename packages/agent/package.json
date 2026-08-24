@@ -8,12 +8,14 @@
     ".": "./index.ts"
   },
   "scripts": {
+    "contract:live": "node scripts/provider-contract-live.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "catalog:",
     "@ai-sdk/openai": "catalog:",
     "@ai-sdk/openai-compatible": "catalog:",
+    "@ai-sdk/provider": "catalog:",
     "@open-agents/sandbox": "workspace:*",
     "ai": "catalog:",
     "zod": "catalog:"

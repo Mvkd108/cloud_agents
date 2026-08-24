@@ -4,7 +4,6 @@
  */
 
 import { isHobbyResourceProfile } from "../deployment/resource-profile.ts";
-
 /** SDK safety buffer reserved for sandbox before-stop hooks (30 seconds) */
 const VERCEL_SANDBOX_TIMEOUT_BUFFER_MS = 30 * 1000;
 

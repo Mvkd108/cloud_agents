@@ -5,6 +5,20 @@ import path from "node:path";
 import type { ToolNeedsApprovalFunction } from "./utils";
 
 const sandboxRegistry = new Map<string, Record<string, unknown>>();
+const originalFetch = globalThis.fetch;
+let dnsAddresses: Array<{ address: string; family: number }> = [
+  { address: "93.184.216.34", family: 4 },
+];
+let dnsLookupError: Error | null = null;
+
+mock.module("node:dns/promises", () => ({
+  lookup: async () => {
+    if (dnsLookupError) {
+      throw dnsLookupError;
+    }
+    return dnsAddresses;
+  },
+}));
 
 mock.module("ai", () => {
   class MockToolLoopAgent {
@@ -70,6 +84,7 @@ const { MAX_BODY_LENGTH, isAllowedWebUrl, webFetchTool } =
   await import("./fetch");
 const { globTool } = await import("./glob");
 const { grepTool } = await import("./grep");
+const { installDependenciesTool } = await import("./install-dependencies");
 const { readFileTool } = await import("./read");
 const { skillTool } = await import("./skill");
 const { taskTool } = await import("./task");
@@ -468,49 +483,27 @@ describe("tools execute behavior", () => {
 
   afterEach(() => {
     sandboxRegistry.clear();
+    dnsAddresses = [{ address: "93.184.216.34", family: 4 }];
+    dnsLookupError = null;
+    globalThis.fetch = originalFetch;
   });
 
-  test("webFetchTool treats curl exit 23 as a truncated success", async () => {
-    let executedCommand = "";
-    const responseBody = "x".repeat(MAX_BODY_LENGTH);
-
-    const sandbox = {
-      workingDirectory: "/repo",
-      exec: async (command: string) => {
-        executedCommand = command;
-
-        if (command.startsWith("getent ahosts")) {
-          return {
-            success: true,
-            exitCode: 0,
-            stdout: "93.184.216.34\n",
-            stderr: "",
-            truncated: false,
-          };
-        }
-
-        return {
-          success: false,
-          exitCode: 23,
-          stdout: `${responseBody}\n200`,
-          stderr: "",
-          truncated: false,
-        };
-      },
-    };
-
-    const context = createContext(sandbox);
+  test("webFetchTool runs outside the sandbox and truncates large bodies", async () => {
+    let requestedUrl = "";
+    globalThis.fetch = (async (input) => {
+      requestedUrl = String(input);
+      return new Response("x".repeat(MAX_BODY_LENGTH + 1), { status: 200 });
+    }) as typeof fetch;
 
     const result = await webFetchTool.execute?.(
       {
         url: "https://example.com",
         method: "GET",
       },
-      executionOptions(context),
+      executionOptions(),
     );
 
-    expect(executedCommand).toContain("curl");
-    expect(executedCommand).toContain(`head -c ${MAX_BODY_LENGTH}`);
+    expect(requestedUrl).toBe("https://example.com");
     expect(result).toMatchObject({
       success: true,
       status: 200,
@@ -538,29 +531,17 @@ describe("tools execute behavior", () => {
   });
 
   test("webFetchTool rejects public hostnames that resolve to private addresses", async () => {
-    const sandbox = {
-      workingDirectory: "/repo",
-      exec: async (command: string) => {
-        if (command.startsWith("getent ahosts")) {
-          return {
-            success: true,
-            exitCode: 0,
-            stdout: "127.0.0.1\n",
-            stderr: "",
-            truncated: false,
-          };
-        }
-
-        throw new Error("curl should not run for private DNS results");
-      },
-    };
+    dnsAddresses = [{ address: "127.0.0.1", family: 4 }];
+    globalThis.fetch = (() => {
+      throw new Error("fetch should not run for private DNS results");
+    }) as unknown as typeof fetch;
 
     const result = await webFetchTool.execute?.(
       {
         url: "https://internal.example",
         method: "GET",
       },
-      executionOptions(createContext(sandbox)),
+      executionOptions(),
     );
 
     expect(result).toEqual({
@@ -570,29 +551,17 @@ describe("tools execute behavior", () => {
   });
 
   test("webFetchTool rejects when DNS resolution fails", async () => {
-    const sandbox = {
-      workingDirectory: "/repo",
-      exec: async (command: string) => {
-        if (command.startsWith("getent ahosts")) {
-          return {
-            success: false,
-            exitCode: 2,
-            stdout: "",
-            stderr: "resolution failed",
-            truncated: false,
-          };
-        }
-
-        throw new Error("curl should not run when DNS validation fails");
-      },
-    };
+    dnsLookupError = new Error("resolution failed");
+    globalThis.fetch = (() => {
+      throw new Error("fetch should not run when DNS validation fails");
+    }) as unknown as typeof fetch;
 
     const result = await webFetchTool.execute?.(
       {
         url: "https://unresolved.example",
         method: "GET",
       },
-      executionOptions(createContext(sandbox)),
+      executionOptions(),
     );
 
     expect(result).toEqual({
@@ -636,6 +605,70 @@ describe("tools execute behavior", () => {
     for (const url of allowedUrls) {
       expect(isAllowedWebUrl(url)).toBe(true);
     }
+  });
+
+  test("installDependenciesTool always requires approval and accepts no command", async () => {
+    const needsApproval = await getNeedsApprovalResult(
+      installDependenciesTool.needsApproval,
+      { cwd: ".", lockfileMode: "frozen" as const },
+      createContext({ workingDirectory: "/repo" }),
+    );
+
+    expect(needsApproval).toBe(true);
+    expect("command" in (installDependenciesTool.inputSchema as object)).toBe(
+      false,
+    );
+  });
+
+  test("installDependenciesTool delegates a workspace-scoped install", async () => {
+    let installCall: { cwd: string; lockfileMode: string } | undefined;
+    const context = createContext({
+      workingDirectory: "/repo",
+      installDependencies: async (cwd: string, lockfileMode: string) => {
+        installCall = { cwd, lockfileMode };
+        return {
+          success: true,
+          packageManager: "pnpm",
+          exitCode: 0,
+          stdout: "installed",
+          stderr: "",
+          truncated: false,
+        };
+      },
+    });
+
+    const result = await installDependenciesTool.execute?.(
+      { cwd: "apps/web", lockfileMode: "frozen" },
+      executionOptions(context),
+    );
+
+    expect(installCall).toEqual({
+      cwd: "/repo/apps/web",
+      lockfileMode: "frozen",
+    });
+    expect(result).toMatchObject({
+      success: true,
+      packageManager: "pnpm",
+    });
+  });
+
+  test("installDependenciesTool rejects paths outside the workspace", async () => {
+    const context = createContext({
+      workingDirectory: "/repo",
+      installDependencies: async () => {
+        throw new Error("install should not run");
+      },
+    });
+
+    const result = await installDependenciesTool.execute?.(
+      { cwd: "../outside", lockfileMode: "frozen" },
+      executionOptions(context),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: "Dependency installation must stay inside the workspace",
+    });
   });
 
   test("askUserQuestionTool formats structured answers", () => {

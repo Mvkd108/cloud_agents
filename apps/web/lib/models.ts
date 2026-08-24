@@ -20,9 +20,16 @@ export interface AvailableModelCost extends AvailableModelCostTier {
   context_over_200k?: AvailableModelCostTier;
 }
 
+export interface ModelCapabilities {
+  tools: boolean;
+  vision: boolean;
+  reasoning: boolean;
+}
+
 export type AvailableModel = GatewayAvailableModel & {
   context_window?: number;
   cost?: AvailableModelCost;
+  capabilities?: ModelCapabilities;
 };
 
 export function getModelDisplayName(model: AvailableModel): string {

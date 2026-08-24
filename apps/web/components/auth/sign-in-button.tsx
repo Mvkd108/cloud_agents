@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { useState, type ComponentProps } from "react";
 import { Button } from "@/components/ui/button";
 import { authClient } from "@/lib/auth/client";
+import { GitHubIcon } from "./hero-icons";
 
 function VercelIcon({ className }: { className?: string }) {
   return (
@@ -16,6 +17,22 @@ function VercelIcon({ className }: { className?: string }) {
       <path d="M12 1L24 22H0L12 1Z" />
     </svg>
   );
+}
+
+/**
+ * Social providers configured in `lib/auth/config.ts`. Account linking is
+ * enabled for both, so signing in with either provider resolves to the same
+ * user when the accounts share an identity.
+ */
+export type SignInProvider = "vercel" | "github";
+
+const PROVIDER_LABEL: Record<SignInProvider, string> = {
+  vercel: "Vercel",
+  github: "GitHub",
+};
+
+function ProviderIcon({ provider }: { provider: SignInProvider }) {
+  return provider === "github" ? <GitHubIcon /> : <VercelIcon />;
 }
 
 function resolveRedirectPath(value: string): string {
@@ -37,11 +54,13 @@ function resolveRedirectPath(value: string): string {
 
 type SignInButtonProps = {
   callbackUrl?: string;
+  provider?: SignInProvider;
 } & Omit<ComponentProps<typeof Button>, "onClick">;
 
 export function SignInButton({
   callbackUrl,
   disabled,
+  provider = "vercel",
   ...props
 }: SignInButtonProps) {
   const [isLoading, setIsLoading] = useState(false);
@@ -56,7 +75,7 @@ export function SignInButton({
 
     setIsLoading(true);
     authClient.signIn.social({
-      provider: "vercel",
+      provider,
       callbackURL: redirectPath,
     });
   }
@@ -68,8 +87,12 @@ export function SignInButton({
       disabled={disabled || isLoading}
       onClick={handleSignIn}
     >
-      {isLoading ? <Loader2 className="animate-spin" /> : <VercelIcon />}
-      {isLoading ? "Signing in..." : "Sign in with Vercel"}
+      {isLoading ? (
+        <Loader2 className="animate-spin" />
+      ) : (
+        <ProviderIcon provider={provider} />
+      )}
+      {isLoading ? "Signing in..." : `Sign in with ${PROVIDER_LABEL[provider]}`}
     </Button>
   );
 }

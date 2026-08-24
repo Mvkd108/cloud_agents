@@ -39,7 +39,6 @@ import {
   getSessionSandboxName,
   isSandboxActive,
 } from "@/lib/sandbox/utils";
-import { installGlobalSkills } from "@/lib/skills/global-skill-installer";
 import { eq } from "drizzle-orm";
 
 type UserRecord = {
@@ -171,36 +170,9 @@ async function getSetupToken(params: {
   });
 }
 
-async function installSessionGlobalSkills(params: {
-  session: SessionRecord;
-  sandbox: Sandbox;
-  didSetupWorkspace: boolean;
-}): Promise<void> {
-  if (!params.didSetupWorkspace) {
-    return;
-  }
-
-  const globalSkillRefs = params.session.globalSkillRefs ?? [];
-  if (globalSkillRefs.length === 0) {
-    return;
-  }
-
-  try {
-    await installGlobalSkills({
-      sandbox: params.sandbox,
-      globalSkillRefs,
-    });
-  } catch (error) {
-    console.error(
-      `Failed to install global skills for session ${params.session.id}:`,
-      error,
-    );
-  }
-}
-
 async function stopSandboxAfterArchiveRace(params: {
   sessionId: string;
-  sandbox: Sandbox;
+  sandbox: Awaited<ReturnType<typeof connectSandbox>>;
 }): Promise<never> {
   try {
     await params.sandbox.stop();
@@ -283,12 +255,6 @@ export async function provisionSessionSandbox(params: {
       sandbox,
     });
   }
-
-  await installSessionGlobalSkills({
-    session,
-    sandbox,
-    didSetupWorkspace,
-  });
 
   kickSandboxLifecycleWorkflow({
     sessionId: params.sessionId,

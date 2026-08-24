@@ -111,3 +111,12 @@ Hard-won knowledge from building this codebase. When you make a mistake or disco
 - GitHub fork creation can take longer than a few seconds to become pushable; PR fallback should retry fork push on transient `repository not found` errors instead of failing immediately.
 - Git push failures from Vercel sandboxes can return empty output even when auth/write is denied; PR fallback logic should not rely only on matching "permission" text before attempting fork fallback.
 - When the GitHub App lacks push access (e.g. repo removed from installation scope), fail fast with a 403 directing users to /settings/connections rather than silently forking.
+
+## Launch and Deployment
+
+- Treat `REDIS_URL` or `KV_URL` as required for production launch: rate-limited API
+  operations fail closed with `503` when neither is configured, even though other
+  Redis-backed features may have in-memory fallbacks in development.
+- Keep the deploy-template repository URL and environment list in a tested module and
+  consume it from deployment UI; duplicated hard-coded deploy links can silently point
+  operators at the upstream repository or request obsolete variables.

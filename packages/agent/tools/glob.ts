@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import * as path from "path";
 import { getSandbox, shellEscape, toDisplayPath } from "./utils";
+import { resolveWorkspacePath } from "./path-security";
 
 interface FileInfo {
   path: string;
@@ -60,13 +60,14 @@ EXAMPLES:
       const workingDirectory = sandbox.workingDirectory;
 
       try {
-        let searchDir: string;
-        if (basePath) {
-          searchDir = path.isAbsolute(basePath)
-            ? basePath
-            : path.resolve(workingDirectory, basePath);
-        } else {
-          searchDir = workingDirectory;
+        let searchDir = basePath
+          ? resolveWorkspacePath(basePath, workingDirectory)
+          : workingDirectory;
+        if (!searchDir) {
+          return {
+            success: false,
+            error: "Glob path must stay within the workspace.",
+          };
         }
 
         // Extract file name pattern from glob (last segment)
@@ -84,7 +85,13 @@ EXAMPLES:
           literalPrefix.push(part);
         }
         if (literalPrefix.length > 0) {
-          searchDir = path.join(searchDir, ...literalPrefix);
+          searchDir = resolveWorkspacePath(literalPrefix.join("/"), searchDir);
+          if (!searchDir) {
+            return {
+              success: false,
+              error: "Glob pattern must stay within the workspace.",
+            };
+          }
         }
 
         // Determine maxdepth from remaining wildcard directory segments.

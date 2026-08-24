@@ -1,4 +1,4 @@
-import { withTemporaryGitHubAuth, type Sandbox } from "@open-agents/sandbox";
+import { execGitHubBrokered, type Sandbox } from "@open-agents/sandbox";
 import { looksLikeCommitHash } from "@/lib/git/helpers";
 import { updateSession } from "@/lib/db/sessions";
 import { openPullRequest, findPullRequest } from "@/lib/github/pulls";
@@ -208,22 +208,17 @@ export async function performAutoCreatePr(
 
   let remoteBranchResult: Awaited<ReturnType<typeof sandbox.exec>>;
   try {
-    remoteBranchResult = await withTemporaryGitHubAuth(
+    await execGitHubBrokered(
       sandbox,
       readToken.token,
-      async () => {
-        await sandbox.exec(
-          `git fetch origin ${defaultBranch}:refs/remotes/origin/${defaultBranch}`,
-          cwd,
-          30000,
-        );
-
-        return sandbox.exec(
-          `git ls-remote --heads origin ${branchName}`,
-          cwd,
-          10000,
-        );
-      },
+      `git fetch origin ${defaultBranch}:refs/remotes/origin/${defaultBranch}`,
+      30000,
+    );
+    remoteBranchResult = await execGitHubBrokered(
+      sandbox,
+      readToken.token,
+      `git ls-remote --heads origin ${branchName}`,
+      10000,
     );
   } finally {
     await revokeInstallationToken(readToken.token);

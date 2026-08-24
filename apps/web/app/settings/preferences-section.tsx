@@ -1,12 +1,8 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Plus, Search, Trash2, X } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
 import { type ThemePreference, useTheme } from "@/app/providers";
-import {
-  DEFAULT_SANDBOX_TYPE,
-  type SandboxType,
-} from "@/components/sandbox-selector-compact";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,18 +23,10 @@ import {
   useUserPreferences,
 } from "@/hooks/use-user-preferences";
 import {
-  globalSkillRefSchema,
-  type GlobalSkillRef,
-} from "@/lib/skills/global-skill-refs";
-import {
   type ModelOption,
   getDefaultModelOptionId,
   withMissingModelOption,
 } from "@/lib/model-options";
-
-const SANDBOX_OPTIONS: Array<{ id: SandboxType; name: string }> = [
-  { id: "vercel", name: "Vercel" },
-];
 
 const THEME_OPTIONS: Array<{ id: ThemePreference; name: string }> = [
   { id: "system", name: "System" },
@@ -53,29 +41,6 @@ const DIFF_MODE_OPTIONS: Array<{ id: DiffMode; name: string }> = [
 
 function isThemePreference(value: string): value is ThemePreference {
   return THEME_OPTIONS.some((option) => option.id === value);
-}
-
-function getGlobalSkillRefError(params: {
-  source: string;
-  skillName: string;
-  existingRefs: GlobalSkillRef[];
-}): string | null {
-  const parsedRef = globalSkillRefSchema.safeParse({
-    source: params.source,
-    skillName: params.skillName,
-  });
-
-  if (!parsedRef.success) {
-    return parsedRef.error.issues[0]?.message ?? "Invalid global skill ref";
-  }
-
-  const duplicateExists = params.existingRefs.some(
-    (ref) =>
-      ref.source.toLowerCase() === parsedRef.data.source.toLowerCase() &&
-      ref.skillName.toLowerCase() === parsedRef.data.skillName.toLowerCase(),
-  );
-
-  return duplicateExists ? "That global skill has already been added" : null;
 }
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
@@ -96,46 +61,6 @@ export function PreferencesSectionSkeleton() {
           <Skeleton className="h-16 w-full" />
           <Skeleton className="h-16 w-full" />
           <Skeleton className="h-16 w-full" />
-        </div>
-      </div>
-
-      <div className="border-t border-border/50" />
-
-      <div className="space-y-4">
-        <SectionHeader>Skills</SectionHeader>
-        <div className="space-y-3">
-          <div className="space-y-1">
-            <Skeleton className="h-4 w-24" />
-            <Skeleton className="h-4 w-[28rem] max-w-full" />
-          </div>
-          <div className="rounded-lg border border-border/70">
-            {Array.from({ length: 2 }).map((_, index) => (
-              <div
-                key={index}
-                className="flex items-center gap-3 border-b border-border/60 px-3 py-2.5 last:border-b-0"
-              >
-                <div className="grid min-w-0 flex-1 gap-1">
-                  <Skeleton className="h-4 w-28" />
-                  <Skeleton className="h-3 w-44" />
-                </div>
-                <Skeleton className="size-8 rounded-md" />
-              </div>
-            ))}
-          </div>
-          <div className="grid gap-2.5 rounded-lg border border-dashed border-border/60 p-3">
-            <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-              <div className="grid gap-1.5">
-                <Skeleton className="h-3.5 w-24" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-              <div className="grid gap-1.5">
-                <Skeleton className="h-3.5 w-20" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-              <Skeleton className="h-10 w-20" />
-            </div>
-            <Skeleton className="h-4 w-[30rem] max-w-full" />
-          </div>
         </div>
       </div>
     </div>
@@ -192,11 +117,6 @@ function usePreferencesSectionState() {
   const { preferences, loading, updatePreferences } = useUserPreferences();
   const { modelOptions, loading: modelOptionsLoading } = useModelOptions();
   const [isSaving, setIsSaving] = useState(false);
-  const [globalSkillSource, setGlobalSkillSource] = useState("");
-  const [globalSkillName, setGlobalSkillName] = useState("");
-  const [globalSkillsError, setGlobalSkillsError] = useState<string | null>(
-    null,
-  );
   const [copiedPublicProfile, setCopiedPublicProfile] = useState(false);
 
   const selectedDefaultModelId =
@@ -241,17 +161,6 @@ function usePreferencesSectionState() {
       });
     } catch (error) {
       console.error("Failed to update subagent model preference:", error);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleSandboxChange = async (sandboxType: SandboxType) => {
-    setIsSaving(true);
-    try {
-      await updatePreferences({ defaultSandboxType: sandboxType });
-    } catch (error) {
-      console.error("Failed to update sandbox preference:", error);
     } finally {
       setIsSaving(false);
     }
@@ -342,58 +251,6 @@ function usePreferencesSectionState() {
     }
   };
 
-  const handleAddGlobalSkillRef = async () => {
-    const existingRefs = preferences?.globalSkillRefs ?? [];
-    const errorMessage = getGlobalSkillRefError({
-      source: globalSkillSource,
-      skillName: globalSkillName,
-      existingRefs,
-    });
-
-    if (errorMessage) {
-      setGlobalSkillsError(errorMessage);
-      return;
-    }
-
-    setIsSaving(true);
-    setGlobalSkillsError(null);
-    try {
-      const nextRef = globalSkillRefSchema.parse({
-        source: globalSkillSource,
-        skillName: globalSkillName,
-      });
-      await updatePreferences({
-        globalSkillRefs: [...existingRefs, nextRef],
-      });
-      setGlobalSkillSource("");
-      setGlobalSkillName("");
-    } catch (error) {
-      console.error("Failed to add global skill preference:", error);
-      setGlobalSkillsError("Failed to add global skill");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleRemoveGlobalSkillRef = async (index: number) => {
-    const existingRefs = preferences?.globalSkillRefs ?? [];
-
-    setIsSaving(true);
-    setGlobalSkillsError(null);
-    try {
-      await updatePreferences({
-        globalSkillRefs: existingRefs.filter(
-          (_, refIndex) => refIndex !== index,
-        ),
-      });
-    } catch (error) {
-      console.error("Failed to remove global skill preference:", error);
-      setGlobalSkillsError("Failed to remove global skill");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   const enabledModelIds = useMemo(
     () => new Set(preferences?.enabledModelIds),
     [preferences?.enabledModelIds],
@@ -457,12 +314,6 @@ function usePreferencesSectionState() {
     modelOptions,
     modelOptionsLoading,
     isSaving,
-    globalSkillSource,
-    setGlobalSkillSource,
-    globalSkillName,
-    setGlobalSkillName,
-    globalSkillsError,
-    setGlobalSkillsError,
     copiedPublicProfile,
     setCopiedPublicProfile,
     selectedDefaultModelId,
@@ -473,7 +324,6 @@ function usePreferencesSectionState() {
     handleThemeChange,
     handleModelChange,
     handleSubagentModelChange,
-    handleSandboxChange,
     handleDiffModeChange,
     handleAutoCommitPushChange,
     handleAutoCreatePrChange,
@@ -481,8 +331,6 @@ function usePreferencesSectionState() {
     handleAlertSoundEnabledChange,
     handlePublicUsageEnabledChange,
     handleCopyPublicProfileUrl,
-    handleAddGlobalSkillRef,
-    handleRemoveGlobalSkillRef,
     enabledModelIds,
     handleAddModel,
     handleRemoveModel,
@@ -503,13 +351,7 @@ export function PreferencesSection() {
     isSaving,
     copiedPublicProfile,
     publicProfilePath,
-    globalSkillName,
-    setGlobalSkillName,
-    globalSkillSource,
-    setGlobalSkillSource,
-    globalSkillsError,
     handleThemeChange,
-    handleSandboxChange,
     handleDiffModeChange,
     handleAutoCommitPushChange,
     handleAutoCreatePrChange,
@@ -517,8 +359,6 @@ export function PreferencesSection() {
     handleAlertSoundEnabledChange,
     handlePublicUsageEnabledChange,
     handleCopyPublicProfileUrl,
-    handleAddGlobalSkillRef,
-    handleRemoveGlobalSkillRef,
   } = state;
 
   return (
@@ -546,28 +386,6 @@ export function PreferencesSection() {
               <p className="text-xs text-muted-foreground">
                 Saved in your current browser.
               </p>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="sandbox">Default Sandbox</Label>
-              <Select
-                value={preferences?.defaultSandboxType ?? DEFAULT_SANDBOX_TYPE}
-                onValueChange={(value) =>
-                  handleSandboxChange(value as SandboxType)
-                }
-                disabled={isSaving}
-              >
-                <SelectTrigger id="sandbox" className="w-full">
-                  <SelectValue placeholder="Select a sandbox type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {SANDBOX_OPTIONS.map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      {option.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
 
             <div className="grid gap-2">
@@ -695,110 +513,6 @@ export function PreferencesSection() {
                   </p>
                 </div>
               )}
-          </div>
-        </div>
-      </div>
-
-      <div className="border-t border-border/50" />
-
-      {/* ── Skills ── */}
-      <div className="space-y-4">
-        <SectionHeader>Skills</SectionHeader>
-
-        <div className="grid gap-3">
-          <div className="space-y-1">
-            <Label>Global Skills</Label>
-            <p className="text-xs text-muted-foreground">
-              Skills from GitHub installed outside the repo for every new
-              session. Repo skills with the same name take precedence.
-            </p>
-          </div>
-
-          {(preferences?.globalSkillRefs ?? []).length > 0 ? (
-            <div className="divide-y divide-border/60 rounded-lg border border-border/70">
-              {(preferences?.globalSkillRefs ?? []).map(
-                (globalSkillRef, index) => (
-                  <div
-                    key={`${globalSkillRef.source}-${globalSkillRef.skillName}`}
-                    className="flex items-center gap-3 px-3 py-2.5"
-                  >
-                    <div className="grid min-w-0 flex-1 gap-0.5">
-                      <span className="truncate text-sm font-medium">
-                        {globalSkillRef.skillName}
-                      </span>
-                      <span className="truncate font-mono text-xs text-muted-foreground">
-                        {globalSkillRef.source}
-                      </span>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-muted-foreground hover:text-destructive shrink-0"
-                      onClick={() => handleRemoveGlobalSkillRef(index)}
-                      disabled={isSaving}
-                      aria-label={`Remove ${globalSkillRef.skillName}`}
-                    >
-                      <Trash2 />
-                    </Button>
-                  </div>
-                ),
-              )}
-            </div>
-          ) : (
-            <p className="text-xs italic text-muted-foreground">
-              No global skills configured yet.
-            </p>
-          )}
-
-          <div className="grid gap-2.5 rounded-lg border border-dashed border-border/60 p-3">
-            <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-              <div className="grid gap-1.5">
-                <Label
-                  htmlFor="global-skill-source"
-                  className="text-xs font-medium"
-                >
-                  Repository source
-                </Label>
-                <Input
-                  id="global-skill-source"
-                  value={globalSkillSource}
-                  onChange={(event) => setGlobalSkillSource(event.target.value)}
-                  placeholder="vercel/ai"
-                  disabled={isSaving}
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label
-                  htmlFor="global-skill-name"
-                  className="text-xs font-medium"
-                >
-                  Skill name
-                </Label>
-                <Input
-                  id="global-skill-name"
-                  value={globalSkillName}
-                  onChange={(event) => setGlobalSkillName(event.target.value)}
-                  placeholder="ai-sdk"
-                  disabled={isSaving}
-                />
-              </div>
-              <Button
-                type="button"
-                onClick={handleAddGlobalSkillRef}
-                disabled={isSaving}
-              >
-                <Plus />
-                Add
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Enter the GitHub <code>owner/repo</code> source and the skill
-              name, e.g. <code>vercel/ai</code> + <code>ai-sdk</code>.
-            </p>
-            {globalSkillsError && (
-              <p className="text-xs text-destructive">{globalSkillsError}</p>
-            )}
           </div>
         </div>
       </div>

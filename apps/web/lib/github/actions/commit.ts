@@ -6,7 +6,7 @@ import {
   getStagedDiff,
   syncToRemote,
   syncToRemotePreservingChanges,
-  withTemporaryGitHubAuth,
+  execGitHubBrokered,
   hasUncommittedChanges as checkUncommitted,
 } from "@open-agents/sandbox";
 import {
@@ -66,15 +66,11 @@ async function pushBranchToRemote(params: {
   });
 
   try {
-    const pushResult = await withTemporaryGitHubAuth(
+    const pushResult = await execGitHubBrokered(
       params.sandbox,
       syncToken.token,
-      () =>
-        params.sandbox.exec(
-          `GIT_TERMINAL_PROMPT=0 git push -u origin ${params.branch}`,
-          params.cwd,
-          60000,
-        ),
+      `git push -u origin ${params.branch}`,
+      60000,
     );
 
     if (!pushResult.success) {
@@ -225,8 +221,10 @@ export async function commitChanges(params: {
         permissions: { contents: "read" },
       });
       try {
-        await withTemporaryGitHubAuth(sandbox, syncToken.token, () =>
-          syncToRemotePreservingChanges(sandbox, resolvedBranch),
+        await syncToRemotePreservingChanges(
+          sandbox,
+          resolvedBranch,
+          syncToken.token,
         );
       } finally {
         await revokeInstallationToken(syncToken.token);
@@ -386,9 +384,7 @@ export async function commitChanges(params: {
       permissions: { contents: "read" },
     });
     try {
-      await withTemporaryGitHubAuth(sandbox, syncToken.token, () =>
-        syncToRemote(sandbox, resolvedBranch),
-      );
+      await syncToRemote(sandbox, resolvedBranch, syncToken.token);
     } finally {
       await revokeInstallationToken(syncToken.token);
     }
