@@ -1,13 +1,12 @@
 import {
-  createGateway,
   defaultSettingsMiddleware,
   wrapLanguageModel,
-  type GatewayModelId,
   type JSONValue,
-  type LanguageModel,
 } from "ai";
+import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type { AnthropicLanguageModelOptions } from "@ai-sdk/anthropic";
 import type { OpenAIResponsesProviderOptions } from "@ai-sdk/openai";
+import { createModelProvider } from "./model-provider";
 
 function supportsAdaptiveAnthropicThinking(modelId: string): boolean {
   return modelId.includes("4.6") || modelId.includes("4.7");
@@ -86,20 +85,11 @@ export function mergeProviderOptions(
 
   return merged;
 }
-
-export interface GatewayConfig {
-  baseURL: string;
-  apiKey: string;
-}
-
 export interface GatewayOptions {
-  config?: GatewayConfig;
   providerOptionsOverrides?: ProviderOptionsByProvider;
-  appName?: string;
-  appUrl?: string;
 }
 
-export type { GatewayModelId, LanguageModel, JSONValue };
+export type { JSONValue };
 
 export function shouldApplyOpenAIReasoningDefaults(modelId: string): boolean {
   return modelId.startsWith("openai/gpt-5");
@@ -169,30 +159,38 @@ export function getProviderOptionsForModel(
   return providerOptions;
 }
 
-export function gateway(
-  modelId: GatewayModelId,
-  options: GatewayOptions = {},
-): LanguageModel {
-  const { config, providerOptionsOverrides, appName, appUrl } = options;
-
-  const attributionHeaders = {
-    "http-referer": appUrl ?? "https://open-agents.dev",
-    "x-title": appName ?? "Open Agents",
-  };
-
-  const baseGateway = config
-    ? createGateway({
-        baseURL: config.baseURL,
-        apiKey: config.apiKey,
-        headers: attributionHeaders,
-      })
-    : createGateway({ headers: attributionHeaders });
-
-  let model: LanguageModel = baseGateway(modelId);
-
+export function applyModelMiddleware(
+  model: LanguageModelV3,
+  modelId: string,
+  providerOptionsOverrides?: ProviderOptionsByProvider,
+): LanguageModelV3 {
   const providerOptions = getProviderOptionsForModel(
     modelId,
     providerOptionsOverrides,
+  );
+
+  if (Object.keys(providerOptions).length === 0) {
+    return model;
+  }
+
+  return wrapLanguageModel({
+    model,
+    middleware: defaultSettingsMiddleware({
+      settings: { providerOptions },
+    }),
+  });
+}
+
+export function gateway(
+  modelId: string,
+  options: GatewayOptions = {},
+): LanguageModelV3 {
+  const defaultProvider = createModelProvider({ kind: "vercel-gateway" });
+  let model: LanguageModelV3 = defaultProvider.languageModel(modelId);
+
+  const providerOptions = getProviderOptionsForModel(
+    modelId,
+    options.providerOptionsOverrides,
   );
 
   if (Object.keys(providerOptions).length > 0) {

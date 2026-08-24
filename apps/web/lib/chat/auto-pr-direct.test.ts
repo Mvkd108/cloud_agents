@@ -75,12 +75,9 @@ const getUserGitHubTokenSpy = mock(async (_userId?: string) => userTokenResult);
 const getGitHubAppUserTokenSpy = mock(async (_userId?: string) =>
   getUserGitHubTokenSpy(_userId),
 );
-const withTemporaryGitHubAuthSpy = mock(
-  async (
-    _sandbox: unknown,
-    _token: string | undefined,
-    operation: () => Promise<unknown>,
-  ) => operation(),
+const execGitHubBrokeredSpy = mock(
+  async (_sandbox: unknown, _token: string, command: string) =>
+    execSpy(command),
 );
 const mintInstallationTokenSpy = mock(async () => ({
   token: "ghs_read",
@@ -103,7 +100,7 @@ const sandbox = {
 };
 
 mock.module("@open-agents/sandbox", () => ({
-  withTemporaryGitHubAuth: withTemporaryGitHubAuthSpy,
+  execGitHubBrokered: execGitHubBrokeredSpy,
 }));
 
 mock.module("@/lib/git/helpers", () => ({
@@ -189,7 +186,7 @@ beforeEach(() => {
   generatePullRequestContentFromSandboxSpy.mockClear();
   getUserGitHubTokenSpy.mockClear();
   getGitHubAppUserTokenSpy.mockClear();
-  withTemporaryGitHubAuthSpy.mockClear();
+  execGitHubBrokeredSpy.mockClear();
   mintInstallationTokenSpy.mockClear();
   revokeInstallationTokenSpy.mockClear();
   verifyRepoAccessSpy.mockClear();
@@ -349,10 +346,17 @@ describe("performAutoCreatePr", () => {
       repositoryIds: [123],
       permissions: { contents: "read" },
     });
-    expect(withTemporaryGitHubAuthSpy).toHaveBeenCalledWith(
+    expect(execGitHubBrokeredSpy).toHaveBeenCalledWith(
       sandbox,
       "ghs_read",
-      expect.any(Function),
+      "git fetch origin main:refs/remotes/origin/main",
+      30000,
+    );
+    expect(execGitHubBrokeredSpy).toHaveBeenCalledWith(
+      sandbox,
+      "ghs_read",
+      "git ls-remote --heads origin feature-branch",
+      10000,
     );
     expect(revokeInstallationTokenSpy).toHaveBeenCalledWith("ghs_read");
     expect(generatePullRequestContentFromSandboxSpy).toHaveBeenCalledTimes(1);

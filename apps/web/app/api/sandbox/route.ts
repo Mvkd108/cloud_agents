@@ -28,7 +28,6 @@ import {
   getNextLifecycleVersion,
 } from "@/lib/sandbox/lifecycle";
 import { kickSandboxLifecycleWorkflow } from "@/lib/sandbox/lifecycle-kick";
-import { installGlobalSkills } from "@/lib/skills/global-skill-installer";
 import {
   canOperateOnSandbox,
   clearSandboxState,
@@ -77,21 +76,6 @@ interface CreateSandboxRequest {
 //     "utf-8",
 //   );
 // }
-
-async function installSessionGlobalSkills(params: {
-  sessionRecord: SessionRecord;
-  sandbox: Awaited<ReturnType<typeof connectSandbox>>;
-}): Promise<void> {
-  const globalSkillRefs = params.sessionRecord.globalSkillRefs ?? [];
-  if (globalSkillRefs.length === 0) {
-    return;
-  }
-
-  await installGlobalSkills({
-    sandbox: params.sandbox,
-    globalSkillRefs,
-  });
-}
 
 export async function POST(req: Request) {
   let body: CreateSandboxRequest;
@@ -142,6 +126,16 @@ export async function POST(req: Request) {
   }
 
   sessionRecord = sessionContext.sessionRecord;
+
+  if (
+    sessionRecord.sandboxState &&
+    sessionRecord.sandboxState.type !== "vercel"
+  ) {
+    return Response.json(
+      { error: "This session uses an unsupported sandbox type" },
+      { status: 409 },
+    );
+  }
 
   const sandboxName = getSessionSandboxName(sessionId);
 
@@ -231,8 +225,13 @@ export async function POST(req: Request) {
     }
   }
 
+  let persistedSandboxType: SandboxState["type"] = "vercel";
   if (sessionId && sandbox.getState) {
     const nextState = sandbox.getState() as SandboxState;
+    if (nextState.type !== "vercel") {
+      throw new Error("Sandbox provider returned an unsupported runtime state");
+    }
+    persistedSandboxType = nextState.type;
     await updateSession(sessionId, {
       sandboxState: nextState,
       snapshotUrl: null,
@@ -242,34 +241,6 @@ export async function POST(req: Request) {
       ),
       ...buildActiveLifecycleUpdate(nextState),
     });
-
-    if (sessionRecord) {
-      // TODO: Re-enable this once we have a solid exfiltration defense strategy.
-      // try {
-      //   await syncVercelProjectEnvVarsToSandbox({
-      //     userId: session.user.id,
-      //     sessionRecord,
-      //     sandbox,
-      //   });
-      // } catch (error) {
-      //   console.error(
-      //     `Failed to sync Vercel env vars for session ${sessionRecord.id}:`,
-      //     error,
-      //   );
-      // }
-
-      try {
-        await installSessionGlobalSkills({
-          sessionRecord,
-          sandbox,
-        });
-      } catch (error) {
-        console.error(
-          `Failed to install global skills for session ${sessionRecord.id}:`,
-          error,
-        );
-      }
-    }
 
     kickSandboxLifecycleWorkflow({
       sessionId,
@@ -283,7 +254,7 @@ export async function POST(req: Request) {
     createdAt: Date.now(),
     timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
     currentBranch: repoUrl ? branch : undefined,
-    mode: "vercel",
+    mode: persistedSandboxType,
     timing: { readyMs },
   });
 }

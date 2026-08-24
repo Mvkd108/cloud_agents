@@ -1,59 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { buildDeployTemplateUrl } from "@/lib/deployment/deploy-template";
 
-const DEPLOY_ENV_VARS = [
-  "POSTGRES_URL",
-  "BETTER_AUTH_SECRET",
-  "BETTER_AUTH_URL",
-  "ENCRYPTION_KEY",
-  "NEXT_PUBLIC_VERCEL_APP_CLIENT_ID",
-  "VERCEL_APP_CLIENT_SECRET",
-  "NEXT_PUBLIC_GITHUB_CLIENT_ID",
-  "GITHUB_CLIENT_SECRET",
-  "GITHUB_APP_ID",
-  "GITHUB_APP_PRIVATE_KEY",
-  "NEXT_PUBLIC_GITHUB_APP_SLUG",
-  "GITHUB_WEBHOOK_SECRET",
-] as const;
-
-const DEPLOY_PRODUCTS = [
-  {
-    type: "integration",
-    protocol: "storage",
-    productSlug: "neon",
-    integrationSlug: "neon",
-  },
-  {
-    type: "integration",
-    protocol: "storage",
-    productSlug: "upstash-kv",
-    integrationSlug: "upstash",
-  },
-] as const;
-
-const DEPLOY_TEMPLATE_URL = (() => {
-  const params = new URLSearchParams([
-    ["project-name", "open-agents"],
-    ["repository-name", "open-agents"],
-    ["repository-url", "https://github.com/vercel-labs/open-agents"],
-    ["demo-title", "Open Agents"],
-    [
-      "demo-description",
-      "Open-source reference app for building and running background coding agents on Vercel.",
-    ],
-    ["demo-url", "https://open-agents.dev/"],
-    ["env", DEPLOY_ENV_VARS.join(",")],
-    [
-      "envDescription",
-      "Neon can provide POSTGRES_URL automatically. Generate BETTER_AUTH_SECRET and ENCRYPTION_KEY yourself, then add your Vercel OAuth and GitHub App credentials for a full deployment.",
-    ],
-    ["products", encodeURIComponent(JSON.stringify(DEPLOY_PRODUCTS))],
-    ["skippable-integrations", "1"],
-  ]);
-
-  return `https://vercel.com/new/clone?${params.toString()}`;
-})();
+const DEPLOY_TEMPLATE_URL = buildDeployTemplateUrl();
 
 export const metadata: Metadata = {
   title: "Deploy your own",

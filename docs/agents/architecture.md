@@ -10,13 +10,25 @@ Web -> Agent (packages/agent) -> Sandbox (packages/sandbox)
 
 1. **Web** handles authentication, session management, and the primary user interface
 2. **Agent** (`deepAgent`) is a `ToolLoopAgent` with tools for file ops, bash, and task delegation
-3. **Sandbox** abstracts file system and shell operations for cloud execution backends
+3. **Sandbox** provides the Vercel Sandbox release runtime behind a reusable interface
 
 ## Key Packages
 
 - **packages/agent/** - Core agent implementation with tools, subagents, and context management
 - **packages/sandbox/** - Execution environment abstraction for cloud sandboxes
 - **packages/shared/** - Shared utilities across packages
+
+## MVP runtime boundary
+
+- `apps/web` is the only deployable product surface.
+- Vercel Workflow keeps runs durable when the browser disconnects.
+- Vercel Sandbox is the only public sandbox type; its E2B adapter remains compiled but
+  experimental.
+- The Open Agent in `packages/agent` is the only coding-agent runtime.
+- Hosted model providers are deployment-managed. Only model selection IDs cross
+  durable workflow boundaries; credentials are resolved during server-side execution.
+- `apps/api`, `apps/worker`, and `packages/control-plane` are experimental and must not
+  be deployed for this milestone.
 
 ## Subagent Pattern
 

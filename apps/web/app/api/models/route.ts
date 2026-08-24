@@ -1,5 +1,5 @@
 import { filterModelsForSession } from "@/lib/model-access";
-import { fetchAvailableLanguageModelsWithContext } from "@/lib/models-with-context";
+import { fetchProviderAwareModels } from "@/lib/provider-catalog";
 import { getServerSession } from "@/lib/session/get-server-session";
 
 const CACHE_CONTROL = "private, no-store";
@@ -8,7 +8,7 @@ export async function GET(req: Request) {
   try {
     const [session, models] = await Promise.all([
       getServerSession(),
-      fetchAvailableLanguageModelsWithContext(),
+      fetchProviderAwareModels(),
     ]);
 
     return Response.json(

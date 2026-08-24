@@ -62,8 +62,6 @@ const updateCalls: Array<{
 }> = [];
 const connectConfigs: ConnectConfig[] = [];
 const writeFileCalls: Array<{ path: string; content: string }> = [];
-const execCalls: Array<{ command: string; cwd: string; timeoutMs: number }> =
-  [];
 const dotenvSyncCalls: Array<Record<string, unknown>> = [];
 
 let sessionRecord: TestSessionRecord;
@@ -164,41 +162,6 @@ mock.module("@/lib/sandbox/lifecycle-kick", () => ({
   },
 }));
 
-mock.module("@/lib/skills/global-skill-installer", () => ({
-  installGlobalSkills: async (params: {
-    sandbox: {
-      workingDirectory: string;
-      exec: (
-        command: string,
-        cwd: string,
-        timeoutMs: number,
-      ) => Promise<unknown>;
-    };
-    globalSkillRefs: Array<{ source: string; skillName: string }>;
-  }) => {
-    const homeResult = await params.sandbox.exec(
-      'printf %s "$HOME"',
-      params.sandbox.workingDirectory,
-      5000,
-    );
-    const home =
-      typeof homeResult === "object" &&
-      homeResult !== null &&
-      "stdout" in homeResult &&
-      typeof homeResult.stdout === "string"
-        ? homeResult.stdout
-        : "/root";
-
-    for (const ref of params.globalSkillRefs) {
-      await params.sandbox.exec(
-        `HOME='${home}' npx skills add '${ref.source}' --skill '${ref.skillName}' --agent amp -g -y --copy`,
-        params.sandbox.workingDirectory,
-        120000,
-      );
-    }
-  },
-}));
-
 mock.module("@open-agents/sandbox", () => ({
   connectSandbox: async (config: ConnectConfig) => {
     connectConfigs.push(config);
@@ -211,18 +174,7 @@ mock.module("@open-agents/sandbox", () => ({
         sandboxName: config.state.sandboxName ?? "session_session-1",
         expiresAt: Date.now() + 120_000,
       }),
-      exec: async (command: string, cwd: string, timeoutMs: number) => {
-        execCalls.push({ command, cwd, timeoutMs });
-        if (command === 'printf %s "$HOME"') {
-          return {
-            success: true,
-            exitCode: 0,
-            stdout: "/root",
-            stderr: "",
-            truncated: false,
-          };
-        }
-
+      exec: async () => {
         return {
           success: true,
           exitCode: 0,
@@ -247,7 +199,6 @@ describe("/api/sandbox lifecycle kicks", () => {
     updateCalls.length = 0;
     connectConfigs.length = 0;
     writeFileCalls.length = 0;
-    execCalls.length = 0;
     dotenvSyncCalls.length = 0;
     currentVercelAuthInfo = {
       token: "vercel-token",
@@ -432,7 +383,7 @@ describe("/api/sandbox lifecycle kicks", () => {
     expect(writeFileCalls).toEqual([]);
   });
 
-  test("new sandboxes install global skills", async () => {
+  test("new sandboxes do not download global skills", async () => {
     const { POST } = await routeModulePromise;
 
     sessionRecord.globalSkillRefs = [
@@ -451,15 +402,6 @@ describe("/api/sandbox lifecycle kicks", () => {
     );
 
     expect(response.ok).toBe(true);
-    expect(execCalls).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ command: 'printf %s "$HOME"' }),
-        expect.objectContaining({
-          command:
-            "HOME='/root' npx skills add 'vercel/ai' --skill 'ai-sdk' --agent amp -g -y --copy",
-        }),
-      ]),
-    );
   });
 
   test("rejects unsupported sandbox types", async () => {
@@ -481,5 +423,24 @@ describe("/api/sandbox lifecycle kicks", () => {
     expect(payload.error).toBe("Invalid sandbox type");
     expect(connectConfigs).toHaveLength(0);
     expect(kickCalls).toHaveLength(0);
+  });
+
+  test("rejects the experimental E2B runtime", async () => {
+    const { POST } = await routeModulePromise;
+
+    const response = await POST(
+      new Request("http://localhost/api/sandbox", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "session-1",
+          sandboxType: "e2b",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid sandbox type" });
+    expect(connectConfigs).toHaveLength(0);
   });
 });

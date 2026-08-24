@@ -51,6 +51,8 @@ mock.module("@/lib/db/sessions", () => ({
 
 mock.module("@open-agents/sandbox", () => ({
   connectSandbox: spies.connectSandbox,
+  resolveSandboxProvider: (value: unknown) =>
+    value === "e2b" ? "e2b" : "vercel",
 }));
 
 const { evaluateSandboxLifecycle } = await import("./lifecycle");

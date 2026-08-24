@@ -45,3 +45,11 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # open-agents dev server artifacts
 .open-agents-dev-server-state.json
 .open-agents-dev-server-*.pid
+
+# internal planning, strategy, and agent task-runner material
+# kept out of the public tree; see PLAN.md Phase 0
+PLAN.md
+docs/agents/work-log.md
+docs/agents/context-transfer.md
+docs/agents/deepseek-brief.md
+docs/agents/deepseek-tasks.md

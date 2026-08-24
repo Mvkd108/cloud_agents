@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { getSandbox, shellEscape } from "./utils";
+import { lookup } from "node:dns/promises";
 
 const TIMEOUT_MS = 30_000;
 export const MAX_BODY_LENGTH = 10_000;
@@ -185,30 +185,65 @@ export function isAllowedWebUrl(value: string): boolean {
 
 async function resolvesToPrivateHost(params: {
   hostname: string;
-  sandbox: Awaited<ReturnType<typeof getSandbox>>;
-  workingDirectory: string;
-  abortSignal?: AbortSignal;
 }): Promise<boolean> {
   if (isPrivateHost(params.hostname)) {
     return true;
   }
 
-  const result = await params.sandbox.exec(
-    `getent ahosts ${shellEscape(params.hostname)} | awk '{print $1}' | sort -u`,
-    params.workingDirectory,
-    5000,
-    { signal: params.abortSignal },
-  );
-
-  if (!result.success) {
+  let addresses: Array<{ address: string }>;
+  try {
+    addresses = await lookup(params.hostname, { all: true, verbatim: true });
+  } catch {
     return true;
   }
 
-  return result.stdout
-    .split("\n")
-    .map((address) => address.trim())
-    .filter(Boolean)
-    .some(isPrivateHost);
+  return (
+    addresses.length === 0 ||
+    addresses.some(({ address }) => isPrivateHost(address))
+  );
+}
+
+async function readLimitedResponseBody(response: Response): Promise<{
+  body: string;
+  truncated: boolean;
+}> {
+  if (!response.body) {
+    return { body: "", truncated: false };
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let body = "";
+  let bytesRead = 0;
+  let truncated = false;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const remaining = MAX_BODY_LENGTH - bytesRead;
+    if (remaining <= 0) {
+      truncated = true;
+      await reader.cancel();
+      break;
+    }
+
+    const chunk = value.subarray(0, remaining);
+    body += decoder.decode(chunk, { stream: value.length <= remaining });
+    bytesRead += chunk.length;
+
+    if (value.length > remaining) {
+      truncated = true;
+      await reader.cancel();
+      break;
+    }
+  }
+
+  if (!truncated) {
+    body += decoder.decode();
+  }
+
+  return { body, truncated };
 }
 
 const fetchInputSchema = z.object({
@@ -259,20 +294,11 @@ EXAMPLES:
 - POST with JSON: url: "https://api.example.com/items", method: "POST", headers: {"Content-Type": "application/json"}, body: "{\\\\"name\\\\":\\\\"item\\\\"}"`,
   inputSchema: fetchInputSchema,
   outputSchema: fetchOutputSchema,
-  execute: async (
-    { url, method = "GET", headers, body },
-    { experimental_context, abortSignal },
-  ) => {
-    const sandbox = await getSandbox(experimental_context, "web_fetch");
-    const workingDirectory = sandbox.workingDirectory;
-
+  execute: async ({ url, method = "GET", headers, body }, { abortSignal }) => {
     const parsedUrl = new URL(url);
     if (
       await resolvesToPrivateHost({
         hostname: parsedUrl.hostname,
-        sandbox,
-        workingDirectory,
-        abortSignal,
       })
     ) {
       return {
@@ -281,69 +307,38 @@ EXAMPLES:
       };
     }
 
-    const args: string[] = [
-      "curl",
-      "-sS",
-      "--proto",
-      shellEscape("=http,https"),
-      "--proto-redir",
-      shellEscape("=http,https"),
-      "-X",
-      method,
-      "--max-time",
-      String(Math.ceil(TIMEOUT_MS / 1000)),
-      "-o",
-      `>(head -c ${MAX_BODY_LENGTH} >&3)`,
-      "-w",
-      shellEscape("%{http_code}"),
-    ];
-
-    if (headers) {
-      for (const [key, value] of Object.entries(headers)) {
-        args.push("-H", shellEscape(`${key}: ${value}`));
-      }
-    }
-
-    if (method !== "GET" && method !== "HEAD" && body) {
-      args.push("-d", shellEscape(body));
-    }
-
-    args.push(shellEscape(url));
-
-    const command = [
-      "exec 3>&1",
-      `status=$(${args.join(" ")})`,
-      "curlExit=$?",
-      "exec 3>&-",
-      "printf '\\n%s' \"$status\"",
-      "exit $curlExit",
-    ].join("\n");
-
     try {
-      const result = await sandbox.exec(command, workingDirectory, TIMEOUT_MS, {
-        signal: abortSignal,
+      const timeoutSignal = AbortSignal.timeout(TIMEOUT_MS);
+      const signal = abortSignal
+        ? AbortSignal.any([abortSignal, timeoutSignal])
+        : timeoutSignal;
+      const response = await fetch(url, {
+        method,
+        headers,
+        ...(method !== "GET" && method !== "HEAD" && body !== undefined
+          ? { body }
+          : {}),
+        redirect: "manual",
+        signal,
       });
 
-      if (result.exitCode !== 0 && result.exitCode !== 23) {
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
         return {
           success: false,
-          error: `Fetch failed: ${result.stderr || result.stdout || "Unknown error"}`,
+          error: location
+            ? `Fetch blocked a redirect to ${location}; request that URL separately for approval`
+            : "Fetch blocked a redirect without a Location header",
         };
       }
 
-      const output = result.stdout ?? "";
-      const lastNewline = output.lastIndexOf("\n");
-      const statusText =
-        lastNewline !== -1 ? output.slice(lastNewline + 1).trim() : "";
-      const responseBody =
-        lastNewline !== -1 ? output.slice(0, lastNewline) : output;
-      const status = /^\d+$/.test(statusText) ? parseInt(statusText, 10) : null;
+      const responseBody = await readLimitedResponseBody(response);
 
       return {
         success: true,
-        status,
-        body: responseBody,
-        truncated: result.exitCode === 23,
+        status: response.status,
+        body: responseBody.body,
+        truncated: responseBody.truncated,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

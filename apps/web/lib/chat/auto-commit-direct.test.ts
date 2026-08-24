@@ -68,11 +68,6 @@ mock.module("@open-agents/sandbox", () => ({
   syncToRemotePreservingChanges: async () => {
     syncPreservingChangesCalls += 1;
   },
-  withTemporaryGitHubAuth: async (
-    _sandbox: unknown,
-    _token: string | undefined,
-    operation: () => Promise<unknown>,
-  ) => operation(),
 }));
 
 mock.module("@/lib/db/sessions", () => ({

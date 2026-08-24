@@ -24,7 +24,10 @@ export function AuthGuard({
         {unauthenticatedFallback ?? (
           <div className="flex flex-col items-center gap-4 p-8">
             <p>Please sign in to continue</p>
-            <SignInButton />
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <SignInButton />
+              <SignInButton provider="github" variant="outline" />
+            </div>
           </div>
         )}
       </>

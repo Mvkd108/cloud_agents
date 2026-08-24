@@ -3,6 +3,26 @@ import { glob } from "node:fs/promises";
 
 const testPatterns = ["**/*.test.ts", "**/*.test.tsx"];
 
+function spawnTestProcess(file: string) {
+  const bunTestPath = file.replaceAll("\\", "/");
+
+  if (process.platform !== "win32") {
+    return spawn("bun", ["test", bunTestPath], { stdio: "inherit" });
+  }
+
+  if (!/^[A-Za-z0-9_./@[\]()+-]+$/.test(bunTestPath)) {
+    throw new Error(`Unsafe Windows test path: ${file}`);
+  }
+
+  // Resolve `bun` through PATHEXT rather than hardcoding `bun.cmd`: the npm
+  // install creates a `bun.cmd` shim, but oven-sh/setup-bun installs only
+  // `bun.exe`, so pinning the extension breaks on CI runners.
+  const commandShell = process.env.ComSpec ?? "cmd.exe";
+  return spawn(commandShell, ["/d", "/s", "/c", `bun test ${bunTestPath}`], {
+    stdio: "inherit",
+  });
+}
+
 function isIgnoredPath(path: string): boolean {
   return path.startsWith("node_modules/") || path.startsWith(".");
 }
@@ -27,9 +47,7 @@ async function runTestsIndividually(files: string[]): Promise<void> {
     console.log(`\nRunning ${file}`);
 
     const exitCode = await new Promise<number | null>((resolve, reject) => {
-      const childProcess = spawn("bun", ["test", file], {
-        stdio: "inherit",
-      });
+      const childProcess = spawnTestProcess(file);
 
       childProcess.on("error", reject);
       childProcess.on("close", resolve);

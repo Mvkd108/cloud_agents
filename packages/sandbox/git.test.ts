@@ -3,7 +3,7 @@ import type { ExecResult, Sandbox } from "./interface";
 import { syncToRemotePreservingChanges } from "./git";
 
 const fetchFeatureCommand =
-  "GIT_TERMINAL_PROMPT=0 git fetch --force origin feature:refs/remotes/origin/feature";
+  "GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null GIT_CONFIG_KEY_1=credential.helper GIT_CONFIG_VALUE_1= GIT_TERMINAL_PROMPT=0 git fetch --force origin feature:refs/remotes/origin/feature";
 
 function result(params: Partial<ExecResult> = {}): ExecResult {
   return {

@@ -9,6 +9,16 @@ This file provides guidance for AI coding agents working in this repository.
 - [Architecture & Workspace Structure](docs/agents/architecture.md)
 - [Code Style & Patterns](docs/agents/code-style.md)
 - [Lessons Learned](docs/agents/lessons-learned.md)
+- [Full Project Context](docs/agents/context-transfer.md)
+- [Dated Project Work Log](docs/agents/work-log.md)
+
+## Continuity & Pull Request Checkpoints
+
+- At the start of a new agent session, read the full project context and the latest work-log checkpoint before editing.
+- After every meaningful task, append a dated work-log entry covering scope, exact verification status, commit/push/PR details, known issues, and the next action.
+- Keep one coherent concern per PR. Recommend a commit/push/PR checkpoint after a reviewable slice, before changing subsystems, before risky work, and before pausing or handing off.
+- If the `push-pr-checkpoint` skill is available, apply it at those boundaries.
+- Never commit, push, or create a PR without user authorization. Never describe local-only work as pushed or merged.
 
 ## Authentication
 

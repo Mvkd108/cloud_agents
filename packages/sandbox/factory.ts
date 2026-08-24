@@ -8,6 +8,12 @@ import type { VercelState } from "./vercel/state.ts";
 // Re-export SandboxStatus from types for convenience
 export type { SandboxStatus };
 
+export type SandboxProvider = "vercel" | "e2b";
+
+export function resolveSandboxProvider(value: unknown): SandboxProvider {
+  return value === "e2b" ? "e2b" : "vercel";
+}
+
 /**
  * Unified sandbox state type.
  * Use `type` discriminator to determine which sandbox implementation to use.

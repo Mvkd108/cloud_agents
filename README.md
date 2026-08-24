@@ -1,6 +1,6 @@
 # Open Agents
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?project-name=open-agents&repository-name=open-agents&repository-url=https%3A%2F%2Fgithub.com%2Fvercel-labs%2Fopen-agents&demo-title=Open+Agents&demo-description=Open-source+reference+app+for+building+and+running+background+coding+agents+on+Vercel.&demo-url=https%3A%2F%2Fopen-agents.dev%2F&env=POSTGRES_URL%2CBETTER_AUTH_SECRET%2CNEXT_PUBLIC_VERCEL_APP_CLIENT_ID%2CVERCEL_APP_CLIENT_SECRET%2CNEXT_PUBLIC_GITHUB_CLIENT_ID%2CGITHUB_CLIENT_SECRET%2CGITHUB_APP_ID%2CGITHUB_APP_PRIVATE_KEY%2CNEXT_PUBLIC_GITHUB_APP_SLUG%2CGITHUB_WEBHOOK_SECRET&envDescription=Neon+can+provide+POSTGRES_URL+automatically.+Generate+BETTER_AUTH_SECRET+yourself%2C+then+add+your+Vercel+OAuth+and+GitHub+App+credentials+for+a+full+deployment.&products=%255B%257B%2522type%2522%253A%2522integration%2522%252C%2522protocol%2522%253A%2522storage%2522%252C%2522productSlug%2522%253A%2522neon%2522%252C%2522integrationSlug%2522%253A%2522neon%2522%257D%252C%257B%2522type%2522%253A%2522integration%2522%252C%2522protocol%2522%253A%2522storage%2522%252C%2522productSlug%2522%253A%2522upstash-kv%2522%252C%2522integrationSlug%2522%253A%2522upstash%2522%257D%255D&skippable-integrations=1)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?project-name=cloud-agents&repository-name=cloud-agents&repository-url=https%3A%2F%2Fgithub.com%2FMvkd108%2Fcloud_agents&demo-title=Open+Agents&demo-description=Open-source+background+coding+agent+with+durable+workflows+and+isolated+sandboxes.&env=POSTGRES_URL%2CBETTER_AUTH_SECRET%2CBETTER_AUTH_URL%2CNEXT_PUBLIC_VERCEL_APP_CLIENT_ID%2CVERCEL_APP_CLIENT_SECRET%2CNEXT_PUBLIC_GITHUB_CLIENT_ID%2CGITHUB_CLIENT_SECRET%2CGITHUB_APP_ID%2CGITHUB_APP_PRIVATE_KEY%2CNEXT_PUBLIC_GITHUB_APP_SLUG%2CGITHUB_WEBHOOK_SECRET&envDescription=Neon+provides+Postgres+and+Upstash+provides+production+rate+limiting.+Generate+BETTER_AUTH_SECRET%2C+then+add+the+stable+origin%2C+Vercel+OAuth%2C+and+GitHub+App+credentials.&products=%255B%257B%2522type%2522%253A%2522integration%2522%252C%2522protocol%2522%253A%2522storage%2522%252C%2522productSlug%2522%253A%2522neon%2522%252C%2522integrationSlug%2522%253A%2522neon%2522%257D%252C%257B%2522type%2522%253A%2522integration%2522%252C%2522protocol%2522%253A%2522storage%2522%252C%2522productSlug%2522%253A%2522upstash-kv%2522%252C%2522integrationSlug%2522%253A%2522upstash%2522%257D%255D&skippable-integrations=1)
 
 Open Agents is an open-source reference app for building and running background coding agents on Vercel. It includes the web UI, the agent runtime, sandbox orchestration, and the GitHub integration needed to go from prompt to code changes without keeping your laptop involved.
 
@@ -16,7 +16,8 @@ Web -> Agent workflow -> Sandbox VM
 
 - The web app handles auth, sessions, chat, and streaming UI.
 - The agent runs as a durable workflow on Vercel.
-- The sandbox is the execution environment: filesystem, shell, git, dev servers, and preview ports.
+- Vercel Sandbox is the release execution environment: filesystem, shell, git,
+  dev servers, and preview ports.
 
 ### The key architectural decision: the agent is not the sandbox
 
@@ -46,6 +47,14 @@ A few details that matter for understanding the current implementation:
 - Chat requests start a workflow run instead of executing the agent inline.
 - Each agent turn can continue across many persisted workflow steps.
 - Active runs can be resumed by reconnecting to the stream for the existing workflow.
+- Closing the browser does not stop the workflow or require a background process on
+  the user's computer.
+- Open-weight models use operator-configured hosted inference. They do not run on the
+  user's computer.
+- Vercel Sandbox is the only public runtime for the MVP. The E2B adapter and standalone
+  control plane remain experimental and are not deployment targets.
+- Sandbox network access is deny-by-default. Dependency installation is a separate,
+  approval-gated operation limited to configured package registries.
 - Sandboxes expose ports `3000`, `5173`, `4321`, and `8000`, can optionally use a configured base snapshot, and hibernate after inactivity.
 - Auto-commit and auto-PR are supported, but they are preference-driven features, not always-on behavior.
 
@@ -53,12 +62,36 @@ A few details that matter for understanding the current implementation:
 
 See `apps/web/.env.example` for the full list. Summary:
 
-### Minimum runtime
+### Minimum local runtime
 
 ```env
 POSTGRES_URL=
 BETTER_AUTH_SECRET=
 ```
+
+### Required for production launch
+
+```env
+BETTER_AUTH_URL=https://YOUR_DOMAIN
+# Configure one production rate-limit store:
+REDIS_URL=
+KV_URL=
+```
+
+Production API operations fail closed with `503` when neither Redis variable is
+configured. The deploy button offers Upstash for this requirement.
+
+### Required for the open-model launch gate
+
+```env
+OPENAI_COMPATIBLE_BASE_URL=
+OPENAI_COMPATIBLE_API_KEY=
+OPENAI_COMPATIBLE_MODELS=
+```
+
+Qualify the raw provider model ID with `pnpm provider:contract:live` before enabling
+its descriptor. See [docs/deployment.md](docs/deployment.md) for the contract and
+acceptance sequence.
 
 ### Required for sign-in (Vercel OAuth)
 
@@ -81,16 +114,15 @@ GITHUB_WEBHOOK_SECRET=
 ### Optional
 
 ```env
-REDIS_URL=
-KV_URL=
 OPEN_AGENTS_RESOURCE_PROFILE=
 VERCEL_PROJECT_PRODUCTION_URL=
 NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL=
 VERCEL_SANDBOX_BASE_SNAPSHOT_ID=
+SANDBOX_NPM_REGISTRY_DOMAINS=registry.npmjs.org
 ELEVENLABS_API_KEY=
 ```
 
-- `REDIS_URL` / `KV_URL`: optional skills metadata cache (falls back to in-memory when not configured).
+- `REDIS_URL` / `KV_URL`: one is required in production for fail-closed rate limiting; the same store also backs the optional skills metadata cache.
 - `OPEN_AGENTS_RESOURCE_PROFILE`: optional deployment resource profile. Set to `hobby` to use Hobby-compatible defaults for chat and sandbox resources; leave unset for standard behavior.
 - `VERCEL_PROJECT_PRODUCTION_URL` / `NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL`: canonical production URL for metadata and some callback behavior.
 - `VERCEL_SANDBOX_BASE_SNAPSHOT_ID`: optional base snapshot for fresh sandboxes. If unset, sandboxes start from Vercel's standard Sandbox runtime. Use a snapshot created in/accessible to your own Vercel scope.
@@ -106,11 +138,14 @@ ELEVENLABS_API_KEY=
    openssl rand -base64 32   # BETTER_AUTH_SECRET
    ```
 
-4. Add env vars in Vercel project settings:
+4. Add the minimum env vars in Vercel project settings and attach the offered Neon and
+   Upstash integrations:
 
    ```env
    POSTGRES_URL=
    BETTER_AUTH_SECRET=
+   # Use REDIS_URL or KV_URL from the Upstash integration.
+   REDIS_URL=
    ```
 
 5. Deploy once to get a stable production URL.
@@ -120,9 +155,10 @@ ELEVENLABS_API_KEY=
    https://YOUR_DOMAIN/api/auth/callback/vercel
    ```
 
-7. Add these env vars and redeploy:
+7. Add the stable origin and OAuth env vars, then redeploy:
 
    ```env
+   BETTER_AUTH_URL=https://YOUR_DOMAIN
    NEXT_PUBLIC_VERCEL_APP_CLIENT_ID=
    VERCEL_APP_CLIENT_SECRET=
    ```
@@ -132,13 +168,19 @@ ELEVENLABS_API_KEY=
    - Homepage URL: `https://YOUR_DOMAIN`
    - Callback URL: `https://YOUR_DOMAIN/api/auth/callback/github`
    - Setup URL: `https://YOUR_DOMAIN/api/github/app/callback`
+   - Webhook URL: `https://YOUR_DOMAIN/api/github/webhook`
 
    In the GitHub App settings:
    - use the GitHub App's Client ID and Client Secret for `NEXT_PUBLIC_GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`
+   - generate a webhook secret (for example, `openssl rand -hex 32`) and set the same value in GitHub and `GITHUB_WEBHOOK_SECRET`
    - make the app public if you want org installs to work cleanly
 
 9. Add the GitHub App env vars and redeploy.
-10. Optionally add Redis/KV, `OPEN_AGENTS_RESOURCE_PROFILE=hobby` for Hobby-compatible resource defaults, the canonical production URL vars, and your own `VERCEL_SANDBOX_BASE_SNAPSHOT_ID` if you want fresh sandboxes to start from a preconfigured image.
+10. Configure and qualify one hosted open-weight model as described in
+    [docs/deployment.md](docs/deployment.md), then enable its descriptor.
+11. Run `pnpm launch:preflight`, redeploy, and run
+    `pnpm launch:smoke -- --url=https://YOUR_DOMAIN`.
+12. Optionally add `OPEN_AGENTS_RESOURCE_PROFILE=hobby` for Hobby-compatible resource defaults, the canonical production URL vars, and your own `VERCEL_SANDBOX_BASE_SNAPSHOT_ID` if you want fresh sandboxes to start from a preconfigured image.
 
 ## Local setup
 
@@ -185,6 +227,7 @@ http://localhost:3000/api/auth/callback/vercel
 Then set:
 
 ```env
+BETTER_AUTH_URL=https://YOUR_DOMAIN
 NEXT_PUBLIC_VERCEL_APP_CLIENT_ID=...
 VERCEL_APP_CLIENT_SECRET=...
 ```
@@ -198,6 +241,7 @@ Create a GitHub App for installation-based repo access and configure:
 - Homepage URL: `https://YOUR_DOMAIN`
 - Callback URL: `https://YOUR_DOMAIN/api/auth/callback/github`
 - Setup URL: `https://YOUR_DOMAIN/api/github/app/callback`
+- Webhook URL: `https://YOUR_DOMAIN/api/github/webhook`
 - make the app public if you want org installs to work cleanly
 
 For local development, use `http://localhost:3000` as the homepage URL, `http://localhost:3000/api/auth/callback/github` as the callback URL, and `http://localhost:3000/api/github/app/callback` as the setup URL.
@@ -214,6 +258,8 @@ GITHUB_WEBHOOK_SECRET=...
 ```
 
 `GITHUB_APP_PRIVATE_KEY` can be stored as the PEM contents with escaped newlines or as a base64-encoded PEM.
+Generate `GITHUB_WEBHOOK_SECRET` independently (for example,
+`openssl rand -hex 32`) and enter the same value in the GitHub App webhook settings.
 
 ## Useful commands
 
@@ -223,6 +269,8 @@ pnpm check                  # lint + format check
 pnpm fix                    # lint + format fix
 pnpm typecheck              # typecheck all packages
 pnpm run ci                 # full CI: check, typecheck, tests, migration check
+pnpm launch:preflight       # validate launch environment (add -- --env-file=PATH if needed)
+pnpm launch:smoke -- --url=https://YOUR_DOMAIN # read-only deployed smoke checks
 pnpm sandbox:snapshot-base  # refresh sandbox base snapshot
 ```
 

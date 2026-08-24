@@ -1,30 +1,65 @@
 import { describe, expect, mock, test } from "bun:test";
+import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type { ProviderOptionsByProvider } from "./models";
 
-const createGatewayCalls: Array<Record<string, unknown>> = [];
+const defaultProviderConfigs: Array<Record<string, unknown>> = [];
+const defaultProviderModelIds: string[] = [];
+const wrapCalls: Array<{ model: unknown; middleware: unknown }> = [];
 
-mock.module("ai", () => {
-  const gateway = (modelId: string) => ({ modelId });
+function mockLanguageModel(id: string): LanguageModelV3 {
+  return {
+    specificationVersion: "v3",
+    provider: "mock",
+    modelId: id,
+    supportedUrls: {},
+    doGenerate: () => Promise.resolve({} as never),
+    doStream: () => Promise.resolve({} as never),
+  } as unknown as LanguageModelV3;
+}
+
+mock.module("./model-provider", () => {
+  const defaultProvider = {
+    kind: "vercel-gateway",
+    languageModel: (modelId: string) => {
+      defaultProviderModelIds.push(modelId);
+      return mockLanguageModel(modelId);
+    },
+  };
 
   return {
-    createGateway: (settings?: Record<string, unknown>) => {
-      createGatewayCalls.push(settings ?? {});
-      return gateway;
+    createModelProvider: (config: Record<string, unknown>) => {
+      defaultProviderConfigs.push(config);
+      return defaultProvider;
     },
-    defaultSettingsMiddleware: (_settings: unknown) => ({
-      kind: "default-settings-middleware",
-    }),
-    gateway,
-    wrapLanguageModel: ({ model }: { model: unknown }) => model,
   };
 });
 
-mock.module("@ai-sdk/devtools", () => ({
-  devToolsMiddleware: () => ({ kind: "devtools-middleware" }),
-}));
+mock.module("@ai-sdk/provider", () => {
+  return {};
+});
+
+mock.module("ai", () => {
+  return {
+    createGateway: () => ({ languageModel: () => mockLanguageModel("") }),
+    defaultSettingsMiddleware: (_settings: unknown) => ({
+      kind: "default-settings-middleware",
+    }),
+    wrapLanguageModel: ({
+      model,
+      middleware,
+    }: {
+      model: unknown;
+      middleware: unknown;
+    }) => {
+      wrapCalls.push({ model, middleware });
+      return model;
+    },
+  };
+});
 
 const {
   gateway,
+  applyModelMiddleware,
   getProviderOptionsForModel,
   mergeProviderOptions,
   shouldApplyOpenAIReasoningDefaults,
@@ -240,53 +275,55 @@ describe("mergeProviderOptions", () => {
   });
 });
 
-describe("gateway attribution headers", () => {
-  test("sends default attribution headers", () => {
-    createGatewayCalls.length = 0;
-    gateway("anthropic/claude-sonnet-4.6" as never);
+describe("gateway", () => {
+  test("resolves a model through the default vercel provider", () => {
+    defaultProviderConfigs.length = 0;
+    defaultProviderModelIds.length = 0;
 
-    expect(createGatewayCalls).toEqual([
-      {
-        headers: {
-          "http-referer": "https://open-agents.dev",
-          "x-title": "Open Agents",
-        },
-      },
-    ]);
+    const model = gateway("deepseek/deepseek-v3.2");
+
+    expect(defaultProviderConfigs).toContainEqual({ kind: "vercel-gateway" });
+    expect(defaultProviderModelIds).toEqual(["deepseek/deepseek-v3.2"]);
+    expect(model.modelId).toBe("deepseek/deepseek-v3.2");
   });
 
-  test("allows overriding attribution via appName and appUrl", () => {
-    createGatewayCalls.length = 0;
-    gateway("anthropic/claude-sonnet-4.6" as never, {
-      appName: "My App",
-      appUrl: "https://myapp.com",
-    });
+  test("applies provider-option middleware after model resolution", () => {
+    wrapCalls.length = 0;
+    defaultProviderModelIds.length = 0;
 
-    expect(createGatewayCalls).toEqual([
-      {
-        headers: {
-          "http-referer": "https://myapp.com",
-          "x-title": "My App",
-        },
-      },
-    ]);
+    const model = gateway("openai/gpt-5");
+
+    expect(defaultProviderModelIds).toEqual(["openai/gpt-5"]);
+    expect(wrapCalls).toHaveLength(1);
+    const firstWrapCall = wrapCalls[0];
+    if (!firstWrapCall) {
+      throw new Error("Expected a wrap call");
+    }
+    expect(firstWrapCall.middleware).toEqual({
+      kind: "default-settings-middleware",
+    });
+    expect(model.modelId).toBe("openai/gpt-5");
+  });
+});
+
+describe("applyModelMiddleware", () => {
+  test("returns the model unchanged when no provider options are generated", () => {
+    wrapCalls.length = 0;
+    const raw = mockLanguageModel("test/empty");
+
+    const result = applyModelMiddleware(raw, "test/empty");
+
+    expect(wrapCalls).toHaveLength(0);
+    expect(result).toBe(raw);
   });
 
-  test("passes attribution headers with custom gateway config", () => {
-    createGatewayCalls.length = 0;
-    gateway("anthropic/claude-sonnet-4.6" as never, {
-      config: { baseURL: "https://custom.api", apiKey: "sk-test" },
-    });
+  test("applies middleware when provider options are generated", () => {
+    wrapCalls.length = 0;
+    const raw = mockLanguageModel("openai/gpt-5");
 
-    expect(createGatewayCalls).toEqual([
-      {
-        baseURL: "https://custom.api",
-        apiKey: "sk-test",
-        headers: {
-          "http-referer": "https://open-agents.dev",
-          "x-title": "Open Agents",
-        },
-      },
-    ]);
+    const result = applyModelMiddleware(raw, "openai/gpt-5");
+
+    expect(wrapCalls).toHaveLength(1);
+    expect(result).toBe(raw);
   });
 });

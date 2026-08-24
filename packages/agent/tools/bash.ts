@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import * as path from "path";
 import { getSandbox } from "./utils";
+import { resolveWorkspacePath } from "./path-security";
 
 const TIMEOUT_MS = 120_000;
 
@@ -123,10 +123,16 @@ EXAMPLES:
 
       // Resolve the working directory
       const workingDir = cwd
-        ? path.isAbsolute(cwd)
-          ? cwd
-          : path.resolve(workingDirectory, cwd)
+        ? resolveWorkspacePath(cwd, workingDirectory)
         : workingDirectory;
+      if (!workingDir) {
+        return {
+          success: false,
+          exitCode: null,
+          stdout: "",
+          stderr: "Working directory must stay within the workspace.",
+        };
+      }
 
       // Detached mode: start the command in the background and return immediately
       if (detached) {
