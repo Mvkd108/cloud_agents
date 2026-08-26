@@ -29,6 +29,11 @@ Hard-won knowledge from building this codebase. When you make a mistake or disco
 - In Next.js Route Handlers, `cookies()` from `next/headers` combined with `Response.redirect()` silently drops Set-Cookie headers from the redirect response. Use `NextResponse.redirect()` with `response.cookies.set()` instead to ensure cookies are included in redirect responses.
 - In this codebase's Next.js version, `revalidateTag` must be called with a second argument (for example `{ expire: 0 }`); single-argument calls fail typecheck.
 - For Workflow SDK discovery in Next.js, ensure workflow files live in scanned directories (for this app, `app/`), otherwise manifests can show steps but `0 workflows` and `start()` will not run durable workflows.
+- Keep `workflow` and `@workflow/ai` on an explicitly compatible release pair. The
+  `workflow@5.0.0-beta.5` / `@workflow/ai@5.0.0-beta.4` pair can start a hosted run but
+  fail when Vercel validates World events because `run.input` and `step.input` are
+  absent. `workflow@5.0.0-beta.8` with `@workflow/ai@5.0.0-beta.6` includes the relaxed
+  input schema and must be verified with both a production build and a new deployed run.
 - Server-side optimistic chat route lookup must allow realistic persistence latency (multi-second retry window), otherwise `/sessions/[sessionId]/chats/[chatId]` can redirect away before chat creation finishes.
 
 ## Sandbox Lifecycle
