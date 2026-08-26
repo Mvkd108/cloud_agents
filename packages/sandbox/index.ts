@@ -63,3 +63,12 @@ export {
   type E2BState,
   type E2BStreamingCommandOptions,
 } from "./e2b/index.ts";
+
+// e2b network policy
+export {
+  buildE2BGitHubCredentialBrokeringPolicy,
+  buildE2BGitHubSetupPolicy,
+  buildE2BNpmRegistryNetworkPolicy,
+  E2B_DENY_ALL_NETWORK_UPDATE,
+  E2B_GITHUB_HOSTS,
+} from "./e2b/network-policy.ts";

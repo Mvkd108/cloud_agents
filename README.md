@@ -16,8 +16,10 @@ Web -> Agent workflow -> Sandbox VM
 
 - The web app handles auth, sessions, chat, and streaming UI.
 - The agent runs as a durable workflow on Vercel.
-- Vercel Sandbox is the release execution environment: filesystem, shell, git,
-  dev servers, and preview ports.
+- The sandbox is the release execution environment: filesystem, shell, git,
+  dev servers, and preview ports. Vercel Sandbox is the default compute
+  provider; E2B is an explicitly launch-flagged option. Both start with
+  deny-all egress.
 
 ### The key architectural decision: the agent is not the sandbox
 
@@ -34,7 +36,7 @@ That separation is the main point of the project:
 
 - chat-driven coding agent with file, search, shell, task, skill, and web tools
 - durable multi-step execution with Workflow SDK-backed runs, streaming, and cancellation
-- isolated Vercel sandboxes with snapshot-based resume
+- isolated sandboxes with pause/resume (Vercel Sandbox default, E2B opt-in)
 - repo cloning and branch work inside the sandbox
 - optional auto-commit, push, and PR creation after a successful run
 - session sharing via read-only links
@@ -51,8 +53,9 @@ A few details that matter for understanding the current implementation:
   the user's computer.
 - Open-weight models use operator-configured hosted inference. They do not run on the
   user's computer.
-- Vercel Sandbox is the only public runtime for the MVP. The E2B adapter and standalone
-  control plane remain experimental and are not deployment targets.
+- Vercel Sandbox is the default public runtime. E2B is also supported when a deployment
+  explicitly enables it and supplies its server-side API key. The standalone E2B/Codex
+  control plane remains experimental and is not a deployment target.
 - Sandbox network access is deny-by-default. Dependency installation is a separate,
   approval-gated operation limited to configured package registries.
 - Sandboxes expose ports `3000`, `5173`, `4321`, and `8000`, can optionally use a configured base snapshot, and hibernate after inactivity.

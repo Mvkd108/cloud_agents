@@ -22,11 +22,17 @@ Web -> Agent (packages/agent) -> Sandbox (packages/sandbox)
 
 - `apps/web` is the only deployable product surface.
 - Vercel Workflow keeps runs durable when the browser disconnects.
-- Vercel Sandbox is the only public sandbox type; its E2B adapter remains compiled but
-  experimental.
+- Compute and orchestration are independent choices. Vercel Sandbox is the default
+  compute provider; E2B is selectable only when the deployment explicitly enables it
+  (`E2B_SANDBOX_ENABLED=true` plus `E2B_API_KEY`). The session's persisted
+  `sandboxState.type` is the source of truth for an existing session's provider.
 - The Open Agent in `packages/agent` is the only coding-agent runtime.
-- Hosted model providers are deployment-managed. Only model selection IDs cross
-  durable workflow boundaries; credentials are resolved during server-side execution.
+- Hosted model providers (for example Fireworks) are deployment-managed and run
+  outside the sandbox. Only model selection IDs cross durable workflow boundaries;
+  credentials are resolved during server-side execution and are never passed to the
+  sandbox.
+- Both sandbox providers start with deny-all egress and open network access only
+  temporarily for GitHub brokerage or approved dependency registries.
 - `apps/api`, `apps/worker`, and `packages/control-plane` are experimental and must not
   be deployed for this milestone.
 

@@ -13,6 +13,7 @@ import {
 import { isSandboxActive } from "@/lib/sandbox/utils";
 import { checkBotProtection } from "@/lib/botid";
 import { checkRateLimit, rateLimitKey } from "@/lib/rate-limit";
+import { isSandboxProviderEnabled } from "@/lib/sandbox/provider-policy";
 
 interface ExtendRequest {
   sessionId: string;
@@ -65,6 +66,12 @@ export async function POST(req: Request) {
   const sandboxState = sessionRecord.sandboxState;
   if (!sandboxState) {
     return Response.json({ error: "Sandbox not initialized" }, { status: 400 });
+  }
+  if (sandboxState.type === "e2b" && !isSandboxProviderEnabled("e2b")) {
+    return Response.json(
+      { error: "The E2B sandbox provider is not enabled on this deployment" },
+      { status: 503 },
+    );
   }
 
   try {

@@ -10,9 +10,11 @@ Only `apps/web` is a supported product deployment. `apps/api`, `apps/worker`,
 `packages/control-plane`, and the E2B/Codex template are experimental source
 artifacts and must not be deployed or exposed publicly.
 
-The supported runtime is Vercel Workflow plus Vercel Sandbox. The browser is a
-control surface only: durable work continues after it disconnects, and hosted
-open-weight inference never uses a user's computer.
+The supported runtime is Vercel Workflow for durable orchestration plus a
+sandbox provider for compute: Vercel Sandbox by default, with E2B available as
+an explicit, launch-flagged option. The browser is a control surface only:
+durable work continues after it disconnects, and hosted open-weight inference
+never uses a user's computer.
 
 ## 2. The ordering hazard
 
@@ -42,6 +44,12 @@ The preflight blocks until these launch groups are complete:
 - `REDIS_URL` or `KV_URL`. Production rate-limited APIs deliberately return `503`
   without this store; it is not optional for launch.
 - A complete OpenAI-compatible provider with at least one enabled, tool-capable model.
+
+The sandbox compute choice is independent of the model provider. Vercel Sandbox
+is always available. To enable the E2B sandbox provider, set
+`E2B_SANDBOX_ENABLED=true` and provide `E2B_API_KEY`; the preflight blocks the
+launch when the flag is set without a key. E2B remains hidden (and unselectable)
+whenever the deployment does not report it ready.
 
 Generate `GITHUB_WEBHOOK_SECRET` as an independent random value (for example,
 `openssl rand -hex 32`) and enter the same value in the GitHub App webhook settings.
@@ -78,16 +86,19 @@ Then complete the authenticated acceptance flow:
 
 ## 5. Sandbox network policy
 
-Fresh and resumed sandboxes use deny-all egress. Normal shell commands never receive
-internet access. The agent can request the approval-gated `install_dependencies` tool,
-which detects a JavaScript lockfile and temporarily permits only
-`registry.npmjs.org` plus exact domains configured in
+Fresh and resumed sandboxes use deny-all egress for both providers. Normal shell
+commands never receive internet access. The agent can request the approval-gated
+`install_dependencies` tool, which detects a JavaScript lockfile and temporarily
+permits only `registry.npmjs.org` plus exact domains configured in
 `SANDBOX_NPM_REGISTRY_DOMAINS`. Deny-all is restored after success, failure, or
 cancellation. Start dependency installation before detached dev-server commands.
 
 GitHub clone, fetch, and publish operations use short-lived GitHub App tokens through
 the network-policy broker. Tokens are not written to commands, environments, remotes,
-workflow data, or database records.
+workflow data, or database records. E2B sandboxes enforce the same posture: the
+create-time policy is narrowed to the exact GitHub hosts for cloning, then restored
+to deny-all, and the policy is re-applied on every reconnect before any agent command
+runs.
 
 ## 6. Hosted open-weight qualification
 

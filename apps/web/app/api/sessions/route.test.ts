@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { VercelProjectSelection } from "@/lib/vercel/types";
 
+mock.module("server-only", () => ({}));
+
 let currentSession: {
   authProvider?: "vercel" | "github";
   user: {
@@ -421,5 +423,48 @@ describe("/api/sessions POST vercel project linking", () => {
       autoCommitPushOverride: true,
       autoCreatePrOverride: true,
     });
+  });
+
+  test("rejects E2B sessions when the deployment does not enable E2B", async () => {
+    const { POST } = await routeModulePromise;
+
+    delete process.env.E2B_SANDBOX_ENABLED;
+    delete process.env.E2B_API_KEY;
+
+    const response = await POST(
+      createJsonRequest({
+        sandboxType: "e2b",
+      }),
+    );
+
+    const body = (await response.json()) as { error: string };
+    expect(response.status).toBe(400);
+    expect(body.error).toBe(
+      "The E2B sandbox provider is not enabled on this deployment",
+    );
+    expect(createCalls).toHaveLength(0);
+  });
+
+  test("persists an E2B sandbox type when the deployment enables it", async () => {
+    const { POST } = await routeModulePromise;
+
+    process.env.E2B_SANDBOX_ENABLED = "true";
+    process.env.E2B_API_KEY = "e2b-test-key";
+
+    try {
+      const response = await POST(
+        createJsonRequest({
+          sandboxType: "e2b",
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(createCalls[0]).toMatchObject({
+        sandboxState: { type: "e2b" },
+      });
+    } finally {
+      delete process.env.E2B_SANDBOX_ENABLED;
+      delete process.env.E2B_API_KEY;
+    }
   });
 });

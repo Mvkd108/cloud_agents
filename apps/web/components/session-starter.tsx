@@ -18,7 +18,9 @@ import { BranchSelectorCompact } from "./branch-selector-compact";
 import { RepoSelectorCompact } from "./repo-selector-compact";
 import {
   DEFAULT_SANDBOX_TYPE,
+  getAvailableSandboxOptions,
   SANDBOX_OPTIONS,
+  SandboxSelectorCompact,
   type SandboxType,
 } from "./sandbox-selector-compact";
 import { Switch } from "./ui/switch";
@@ -61,15 +63,40 @@ export function SessionStarter({
     useGitHubConnectionStatus({
       enabled: hasGitHub,
     });
-  const { preferences, loading: preferencesLoading } = useUserPreferences();
+  const {
+    preferences,
+    loading: preferencesLoading,
+    availableSandboxTypes,
+    updatePreferences,
+  } = useUserPreferences();
   const defaultAutoCommitPush = preferences?.autoCommitPush ?? false;
   const defaultAutoCreatePr = preferences?.autoCreatePr ?? false;
   const [autoCommitPush, setAutoCommitPush] = useState<boolean | null>(null);
   const [autoCreatePr, setAutoCreatePr] = useState<boolean | null>(null);
   const [gitSettingsExpanded, setGitSettingsExpanded] = useState(false);
-  const sandboxType = preferences?.defaultSandboxType ?? DEFAULT_SANDBOX_TYPE;
+  const [selectedSandboxType, setSelectedSandboxType] =
+    useState<SandboxType | null>(null);
+
+  const availableSandboxOptions = getAvailableSandboxOptions({
+    e2bReady: availableSandboxTypes?.includes("e2b") ?? false,
+  });
+  const preferredSandboxType =
+    preferences?.defaultSandboxType ?? DEFAULT_SANDBOX_TYPE;
+  const sandboxType =
+    selectedSandboxType ??
+    (availableSandboxOptions.some((s) => s.id === preferredSandboxType)
+      ? preferredSandboxType
+      : DEFAULT_SANDBOX_TYPE);
   const sandboxName =
     SANDBOX_OPTIONS.find((s) => s.id === sandboxType)?.name ?? sandboxType;
+
+  const handleSandboxTypeChange = (type: SandboxType) => {
+    const previousType = sandboxType;
+    setSelectedSandboxType(type);
+    void updatePreferences({ defaultSandboxType: type }).catch(() => {
+      setSelectedSandboxType(previousType);
+    });
+  };
   const isRepoModeDisabled = sessionLoading || isTrialUser;
 
   useEffect(() => {
@@ -294,9 +321,17 @@ export function SessionStarter({
           {isLoading ? "Creating session…" : buttonLabel}
         </button>
 
-        <p className="text-center text-xs text-muted-foreground">
-          Using the isolated {sandboxName} sandbox
-        </p>
+        <div className="flex flex-col items-center gap-1">
+          <p className="text-center text-xs text-muted-foreground">
+            Using the isolated {sandboxName} sandbox
+          </p>
+          <SandboxSelectorCompact
+            value={sandboxType}
+            onChange={handleSandboxTypeChange}
+            options={availableSandboxOptions}
+            disabled={controlsDisabled}
+          />
+        </div>
       </div>
     </div>
   );

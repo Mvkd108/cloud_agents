@@ -16,32 +16,54 @@ import {
   CommandList,
 } from "@/components/ui/command";
 
-export type SandboxType = "vercel";
+export type SandboxType = "vercel" | "e2b";
 
-interface SandboxOption {
+export interface SandboxOption {
   id: SandboxType;
   name: string;
   description: string;
 }
 
+/** All known providers; used for display-name lookups across the app. */
 export const SANDBOX_OPTIONS: SandboxOption[] = [
   {
     id: "vercel",
     name: "Vercel",
     description: "Cloud sandbox",
   },
+  {
+    id: "e2b",
+    name: "E2B",
+    description: "E2B cloud sandbox",
+  },
 ];
+
+/**
+ * Providers the deployment currently exposes. E2B is only offered when the
+ * deployment reports it ready (flag + credentials); Vercel stays the default.
+ */
+export function getAvailableSandboxOptions(options: {
+  e2bReady: boolean;
+}): SandboxOption[] {
+  return SANDBOX_OPTIONS.filter(
+    (sandbox) => sandbox.id !== "e2b" || options.e2bReady,
+  );
+}
 
 export const DEFAULT_SANDBOX_TYPE: SandboxType = "vercel";
 
 interface SandboxSelectorCompactProps {
   value: SandboxType;
   onChange: (sandboxType: SandboxType) => void;
+  options?: SandboxOption[];
+  disabled?: boolean;
 }
 
 export function SandboxSelectorCompact({
   value,
   onChange,
+  options = SANDBOX_OPTIONS,
+  disabled = false,
 }: SandboxSelectorCompactProps) {
   const [open, setOpen] = useState(false);
 
@@ -50,15 +72,16 @@ export function SandboxSelectorCompact({
     setOpen(false);
   };
 
-  const selectedSandbox = SANDBOX_OPTIONS.find((s) => s.id === value);
+  const selectedSandbox = options.find((s) => s.id === value);
   const displayText = selectedSandbox?.name ?? value;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={disabled ? () => {} : setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-neutral-500 transition-colors hover:bg-white/5 hover:text-neutral-300"
+          disabled={disabled}
+          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-neutral-500 transition-colors hover:bg-white/5 hover:text-neutral-300 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-neutral-500"
         >
           <span className="max-w-[100px] truncate">{displayText}</span>
           <ChevronDown className="h-3 w-3" />
@@ -69,7 +92,7 @@ export function SandboxSelectorCompact({
           <CommandList>
             <CommandEmpty>No sandbox types found.</CommandEmpty>
             <CommandGroup>
-              {SANDBOX_OPTIONS.map((sandbox) => (
+              {options.map((sandbox) => (
                 <CommandItem
                   key={sandbox.id}
                   value={sandbox.id}

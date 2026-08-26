@@ -37,6 +37,11 @@ import {
   vercelProjectSelectionSchema,
   type VercelProjectSelection,
 } from "@/lib/vercel/types";
+import type { SandboxType } from "@/components/sandbox-selector-compact";
+import {
+  getDefaultSandboxProvider,
+  isSandboxProviderEnabled,
+} from "@/lib/sandbox/provider-policy";
 
 interface CreateSessionRequest {
   title?: string;
@@ -45,7 +50,7 @@ interface CreateSessionRequest {
   branch?: string;
   cloneUrl?: string;
   isNewBranch?: boolean;
-  sandboxType?: "vercel";
+  sandboxType?: SandboxType;
   autoCommitPush?: boolean;
   autoCreatePr?: boolean;
   vercelProject?: VercelProjectSelection | null;
@@ -219,8 +224,19 @@ export async function POST(req: Request) {
     );
   }
 
-  if (body.sandboxType && body.sandboxType !== "vercel") {
+  if (
+    body.sandboxType !== undefined &&
+    body.sandboxType !== "vercel" &&
+    body.sandboxType !== "e2b"
+  ) {
     return Response.json({ error: "Invalid sandbox type" }, { status: 400 });
+  }
+
+  if (body.sandboxType === "e2b" && !isSandboxProviderEnabled("e2b")) {
+    return Response.json(
+      { error: "The E2B sandbox provider is not enabled on this deployment" },
+      { status: 400 },
+    );
   }
 
   if (
@@ -301,7 +317,7 @@ export async function POST(req: Request) {
     branch,
     cloneUrl,
     isNewBranch,
-    sandboxType = "vercel",
+    sandboxType = getDefaultSandboxProvider(),
     autoCommitPush,
     autoCreatePr,
   } = body;

@@ -7,9 +7,22 @@ import {
 import { sanitizeUserPreferencesForSession } from "@/lib/model-access";
 import type { SandboxType } from "@/components/sandbox-selector-compact";
 import {
+  getSandboxProviderPolicy,
+  isSandboxProviderEnabled,
+} from "@/lib/sandbox/provider-policy";
+import {
   globalSkillRefsSchema,
   type GlobalSkillRef,
 } from "@/lib/skills/global-skill-refs";
+
+/**
+ * Sandbox providers the deployment currently exposes. Vercel is always
+ * available; E2B only when the launch flag and credentials are configured.
+ */
+function getAvailableSandboxTypes(): SandboxType[] {
+  const policy = getSandboxProviderPolicy();
+  return policy.e2b.ready ? ["vercel", "e2b"] : ["vercel"];
+}
 
 interface UpdatePreferencesRequest {
   defaultModelId?: string;
@@ -36,7 +49,10 @@ export async function GET(req: Request) {
     session,
     req.url,
   );
-  return Response.json({ preferences });
+  return Response.json({
+    preferences,
+    availableSandboxTypes: getAvailableSandboxTypes(),
+  });
 }
 
 export async function PATCH(req: Request) {
@@ -55,12 +71,18 @@ export async function PATCH(req: Request) {
   const updates: UpdatePreferencesRequest = {};
 
   if (body.defaultSandboxType !== undefined) {
-    const validTypes = ["vercel"];
+    const validTypes = ["vercel", "e2b"];
     if (
       typeof body.defaultSandboxType !== "string" ||
       !validTypes.includes(body.defaultSandboxType)
     ) {
       return Response.json({ error: "Invalid sandbox type" }, { status: 400 });
+    }
+    if (body.defaultSandboxType === "e2b" && !isSandboxProviderEnabled("e2b")) {
+      return Response.json(
+        { error: "The E2B sandbox provider is not enabled on this deployment" },
+        { status: 400 },
+      );
     }
     updates.defaultSandboxType = body.defaultSandboxType;
   }
@@ -196,7 +218,10 @@ export async function PATCH(req: Request) {
       session,
       req.url,
     );
-    return Response.json({ preferences });
+    return Response.json({
+      preferences,
+      availableSandboxTypes: getAvailableSandboxTypes(),
+    });
   } catch (error) {
     console.error("Failed to update preferences:", error);
     return Response.json(

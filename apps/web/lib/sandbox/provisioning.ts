@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   connectSandbox,
+  type ConnectOptions,
   type Sandbox,
   type SandboxState,
   type VercelState,
@@ -34,6 +35,10 @@ import {
   getNextLifecycleVersion,
 } from "@/lib/sandbox/lifecycle";
 import { kickSandboxLifecycleWorkflow } from "@/lib/sandbox/lifecycle-kick";
+import {
+  getDefaultSandboxProvider,
+  isSandboxProviderEnabled,
+} from "@/lib/sandbox/provider-policy";
 import {
   getResumableSandboxName,
   getSessionSandboxName,
@@ -69,7 +74,7 @@ function isSandboxState(value: unknown): value is SandboxState {
     typeof value === "object" &&
     value !== null &&
     "type" in value &&
-    value.type === "vercel"
+    (value.type === "vercel" || value.type === "e2b")
   );
 }
 
@@ -112,18 +117,75 @@ function isVercelSandboxState(
   return state?.type === "vercel";
 }
 
-function buildSandboxState(session: SessionRecord): SandboxState {
-  const existingState = session.sandboxState;
+/**
+ * Build the provider-specific sandbox state for a session. The persisted
+ * `sandboxState.type` is the source of truth once a session exists; an explicit
+ * requested type wins for brand-new sessions; otherwise the deployment default
+ * applies. Vercel sessions keep their named persistent sandbox, E2B sessions
+ * keep their E2B fields and never gain a Vercel sandboxName.
+ */
+export function buildSandboxState(params: {
+  session: Pick<SessionRecord, "id" | "sandboxState">;
+  sandboxType?: SandboxState["type"];
+  source?: SandboxState["source"];
+}): SandboxState {
+  const existingState = params.session.sandboxState;
+  const type =
+    existingState?.type ?? params.sandboxType ?? getDefaultSandboxProvider();
+
+  if (type === "e2b") {
+    return {
+      ...(existingState?.type === "e2b" ? existingState : { type: "e2b" }),
+      ...(params.source ? { source: params.source } : {}),
+    };
+  }
+
   const sandboxName =
-    getResumableSandboxName(existingState) ?? getSessionSandboxName(session.id);
-  const source = buildSandboxSource(session);
+    getResumableSandboxName(existingState) ??
+    getSessionSandboxName(params.session.id);
 
   return {
     ...(isVercelSandboxState(existingState)
       ? existingState
       : { type: "vercel" }),
     sandboxName,
-    ...(source ? { source } : {}),
+    ...(params.source ? { source: params.source } : {}),
+  };
+}
+
+/**
+ * Build provider-specific connect options. Vercel keeps the named
+ * persistent-sandbox behavior (resume/create-if-missing); E2B does not use
+ * Vercel base snapshots, vCPU sizing, or named persistence options.
+ */
+export function buildSandboxConnectOptions(params: {
+  sandboxType: SandboxState["type"];
+  githubToken?: string;
+  gitUser: { name: string; email: string };
+  timeout: number;
+  vcpus: number;
+  ports: number[];
+  baseSnapshotId?: string;
+}): ConnectOptions {
+  if (params.sandboxType === "e2b") {
+    return {
+      githubToken: params.githubToken,
+      gitUser: params.gitUser,
+      timeout: params.timeout,
+      ports: params.ports,
+    };
+  }
+
+  return {
+    githubToken: params.githubToken,
+    gitUser: params.gitUser,
+    timeout: params.timeout,
+    vcpus: params.vcpus,
+    ports: params.ports,
+    baseSnapshotId: params.baseSnapshotId,
+    persistent: true,
+    resume: true,
+    createIfMissing: true,
   };
 }
 
@@ -201,6 +263,16 @@ export async function provisionSessionSandbox(params: {
     throw new Error("Session is archived");
   }
 
+  const sandboxState = buildSandboxState({
+    session,
+    source: buildSandboxSource(session),
+  });
+  if (sandboxState.type === "e2b" && !isSandboxProviderEnabled("e2b")) {
+    throw new Error(
+      "The E2B sandbox provider is not enabled on this deployment",
+    );
+  }
+
   const didSetupWorkspace = !isSandboxActive(session.sandboxState);
   const user = await getUserById(session.userId);
   if (!user) {
@@ -216,18 +288,16 @@ export async function provisionSessionSandbox(params: {
   let sandbox: Sandbox;
   try {
     sandbox = await connectSandbox({
-      state: buildSandboxState(session),
-      options: {
+      state: sandboxState,
+      options: buildSandboxConnectOptions({
+        sandboxType: sandboxState.type,
         githubToken: setupToken?.token,
         gitUser,
         timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
         vcpus: DEFAULT_SANDBOX_VCPUS,
         ports: DEFAULT_SANDBOX_PORTS,
         baseSnapshotId: DEFAULT_SANDBOX_BASE_SNAPSHOT_ID,
-        persistent: true,
-        resume: true,
-        createIfMissing: true,
-      },
+      }),
     });
   } finally {
     if (setupToken) {
@@ -236,17 +306,17 @@ export async function provisionSessionSandbox(params: {
   }
 
   const rawSandboxState = sandbox.getState?.();
-  const sandboxState = isSandboxState(rawSandboxState)
+  const provisionedSandboxState = isSandboxState(rawSandboxState)
     ? rawSandboxState
-    : buildSandboxState(session);
+    : sandboxState;
 
   const updatedSession = await updateSessionIfNotArchived(params.sessionId, {
-    sandboxState,
+    sandboxState: provisionedSandboxState,
     snapshotUrl: null,
     snapshotCreatedAt: null,
     lifecycleVersion: getNextLifecycleVersion(session.lifecycleVersion),
     lifecycleError: null,
-    ...buildActiveLifecycleUpdate(sandboxState),
+    ...buildActiveLifecycleUpdate(provisionedSandboxState),
   });
 
   if (!updatedSession) {
@@ -262,7 +332,7 @@ export async function provisionSessionSandbox(params: {
   });
 
   return {
-    sandboxState,
+    sandboxState: provisionedSandboxState,
     workingDirectory: sandbox.workingDirectory,
     currentBranch: sandbox.currentBranch,
     environmentDetails: sandbox.environmentDetails,

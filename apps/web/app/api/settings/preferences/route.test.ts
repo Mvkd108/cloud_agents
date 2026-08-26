@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
+mock.module("server-only", () => ({}));
+
 let currentSession: {
   authProvider?: "vercel" | "github";
   user: { id: string; email?: string };
@@ -60,6 +62,8 @@ describe("/api/settings/preferences", () => {
     preferencesState.modelVariants = [];
     preferencesState.enabledModelIds = [];
     updateCalls.length = 0;
+    delete process.env.E2B_SANDBOX_ENABLED;
+    delete process.env.E2B_API_KEY;
   });
 
   test("GET returns 401 when unauthenticated", async () => {
@@ -79,6 +83,7 @@ describe("/api/settings/preferences", () => {
     const response = await GET(createJsonRequest("GET"));
     const body = (await response.json()) as {
       preferences: typeof preferencesState;
+      availableSandboxTypes: string[];
     };
 
     expect(response.status).toBe(200);
@@ -86,6 +91,26 @@ describe("/api/settings/preferences", () => {
     expect(body.preferences.autoCreatePr).toBe(false);
     expect(body.preferences.defaultSandboxType).toBe("vercel");
     expect(body.preferences.globalSkillRefs).toEqual([]);
+    expect(body.availableSandboxTypes).toEqual(["vercel"]);
+  });
+
+  test("GET exposes E2B only when the deployment enables it", async () => {
+    const { GET } = await routeModulePromise;
+
+    const response = await GET(createJsonRequest("GET"));
+    const body = (await response.json()) as {
+      availableSandboxTypes: string[];
+    };
+    expect(body.availableSandboxTypes).toEqual(["vercel"]);
+
+    process.env.E2B_SANDBOX_ENABLED = "true";
+    process.env.E2B_API_KEY = "e2b-test-key";
+
+    const enabledResponse = await GET(createJsonRequest("GET"));
+    const enabledBody = (await enabledResponse.json()) as {
+      availableSandboxTypes: string[];
+    };
+    expect(enabledBody.availableSandboxTypes).toEqual(["vercel", "e2b"]);
   });
 
   test("GET hides Opus defaults for managed trial users", async () => {
@@ -130,6 +155,45 @@ describe("/api/settings/preferences", () => {
     expect(response.status).toBe(400);
     expect(body.error).toBe("Invalid sandbox type");
     expect(updateCalls).toHaveLength(0);
+  });
+
+  test("PATCH rejects an E2B default when the deployment does not enable E2B", async () => {
+    const { PATCH } = await routeModulePromise;
+
+    delete process.env.E2B_SANDBOX_ENABLED;
+    delete process.env.E2B_API_KEY;
+
+    const response = await PATCH(
+      createJsonRequest("PATCH", { defaultSandboxType: "e2b" }),
+    );
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe(
+      "The E2B sandbox provider is not enabled on this deployment",
+    );
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  test("PATCH accepts an E2B default when the deployment enables it", async () => {
+    const { PATCH } = await routeModulePromise;
+
+    process.env.E2B_SANDBOX_ENABLED = "true";
+    process.env.E2B_API_KEY = "e2b-test-key";
+
+    try {
+      const response = await PATCH(
+        createJsonRequest("PATCH", { defaultSandboxType: "e2b" }),
+      );
+
+      expect(response.ok).toBe(true);
+      expect(updateCalls).toContainEqual(
+        expect.objectContaining({ defaultSandboxType: "e2b" }),
+      );
+    } finally {
+      delete process.env.E2B_SANDBOX_ENABLED;
+      delete process.env.E2B_API_KEY;
+    }
   });
 
   test("PATCH rejects invalid autoCommitPush values", async () => {

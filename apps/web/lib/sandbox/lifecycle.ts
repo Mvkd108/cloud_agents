@@ -10,11 +10,7 @@ import {
   SANDBOX_EXPIRES_BUFFER_MS,
   SANDBOX_INACTIVITY_TIMEOUT_MS,
 } from "./config";
-import {
-  canOperateOnSandbox,
-  clearSandboxState,
-  getPersistentSandboxName,
-} from "./utils";
+import { canOperateOnSandbox, clearSandboxState } from "./utils";
 
 export type SandboxLifecycleState =
   | "provisioning"
@@ -184,9 +180,6 @@ export async function evaluateSandboxLifecycle(
   if (!canOperateOnSandbox(sandboxState)) {
     return { action: "skipped", reason: "sandbox-not-operable" };
   }
-  if (sandboxState.type !== "vercel") {
-    return { action: "skipped", reason: "unsupported-sandbox-type" };
-  }
 
   const nowMs = Date.now();
   const dueAtMs = getLifecycleDueAtMs(session);
@@ -240,7 +233,7 @@ export async function evaluateSandboxLifecycle(
 
     await sandbox.stop();
 
-    const clearedState = clearSandboxState(sandboxState);
+    const clearedState = clearSandboxState(sandboxState) ?? sandboxState;
     await updateSession(sessionId, {
       snapshotUrl: null,
       snapshotCreatedAt: null,
@@ -248,7 +241,7 @@ export async function evaluateSandboxLifecycle(
       ...buildHibernatedLifecycleUpdate(),
     });
     console.log(
-      `[Lifecycle] Hibernated sandbox for session ${sessionId} (reason=${reason}, sandboxName=${getPersistentSandboxName(clearedState) ?? "none"}).`,
+      `[Lifecycle] Hibernated sandbox for session ${sessionId} (provider=${clearedState.type}, reason=${reason}).`,
     );
     return { action: "hibernated" };
   } catch (error) {

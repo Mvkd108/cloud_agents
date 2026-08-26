@@ -175,6 +175,31 @@ function evaluateRateLimiting(environment: LaunchEnvironment): LaunchCheck {
   );
 }
 
+function evaluateE2BSandbox(environment: LaunchEnvironment): LaunchCheck {
+  const flagEnabled =
+    environmentValue(environment, "E2B_SANDBOX_ENABLED")?.toLowerCase() ===
+    "true";
+  const apiKey = environmentValue(environment, "E2B_API_KEY");
+
+  if (!flagEnabled) {
+    return check(
+      "e2b-sandbox",
+      "E2B sandbox provider",
+      true,
+      "E2B sandboxes are disabled; Vercel Sandbox remains the default.",
+      "Set E2B_SANDBOX_ENABLED=true and E2B_API_KEY to enable E2B sandboxes.",
+    );
+  }
+
+  return check(
+    "e2b-sandbox",
+    "E2B sandbox provider",
+    Boolean(apiKey),
+    "E2B sandboxes are enabled and configured.",
+    "E2B_SANDBOX_ENABLED=true requires E2B_API_KEY.",
+  );
+}
+
 function evaluateCompatibleProvider(
   environment: LaunchEnvironment,
 ): LaunchCheck {
@@ -263,6 +288,7 @@ export function evaluateLaunchReadiness(
     }),
     evaluateGitHub(environment),
     evaluateRateLimiting(environment),
+    evaluateE2BSandbox(environment),
     evaluateCompatibleProvider(environment),
   ];
 

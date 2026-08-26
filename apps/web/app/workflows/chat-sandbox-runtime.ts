@@ -9,6 +9,7 @@ import {
   kickSandboxProvisioningWorkflow,
   waitForSandboxProvisioningRun,
 } from "@/lib/sandbox/provisioning-kick";
+import { isSandboxProviderEnabled } from "@/lib/sandbox/provider-policy";
 import { isSandboxActive } from "@/lib/sandbox/utils";
 import { getSandboxSkillDirectories } from "@/lib/skills/directories";
 import { getCachedSkills, setCachedSkills } from "@/lib/skills-cache";
@@ -64,6 +65,14 @@ async function getReadySessionSandbox(params: {
   }
   if (session.status === "archived") {
     throw new Error("Session is archived");
+  }
+  if (
+    session.sandboxState?.type === "e2b" &&
+    !isSandboxProviderEnabled("e2b")
+  ) {
+    throw new Error(
+      "The E2B sandbox provider is not enabled on this deployment",
+    );
   }
   if (isSandboxActive(session.sandboxState)) {
     return { session, didSetupWorkspace: false };

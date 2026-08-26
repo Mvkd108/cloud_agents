@@ -604,6 +604,40 @@ describe("VercelSandbox network isolation", () => {
     expect(updateNetworkPolicyCalls.at(-1)).toBe("deny-all");
     expect(updateNetworkPolicyCalls[1]).not.toHaveProperty("allow.*");
   });
+
+  test("does not open network access while a general command is running", async () => {
+    let releaseCommand = () => {};
+    const commandStarted = new Promise<void>((resolve) => {
+      runCommandMock = async () => {
+        resolve();
+        await new Promise<void>((resolve) => {
+          releaseCommand = () => resolve();
+        });
+        return {
+          exitCode: 0,
+          cmdId: "cmd-running",
+          stdout: async () => "",
+          stderr: async () => "",
+        };
+      };
+    });
+    const sandbox = await sandboxModule.VercelSandbox.connect("sbx-test", {
+      remainingTimeout: 0,
+    });
+
+    const command = sandbox.exec("sleep 30", "/vercel/sandbox", 30_000);
+    await commandStarted;
+
+    await expect(
+      sandbox.installDependencies("/vercel/sandbox", "frozen"),
+    ).rejects.toThrow(
+      "Network-enabled operations are unavailable while a general command is running",
+    );
+    expect(updateNetworkPolicyCalls).toEqual(["deny-all"]);
+
+    releaseCommand();
+    expect((await command).success).toBe(true);
+  });
 });
 
 describe("VercelSandbox.execDetached", () => {

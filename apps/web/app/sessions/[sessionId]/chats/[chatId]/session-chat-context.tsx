@@ -45,7 +45,7 @@ import {
   useSessionChatRuntime,
 } from "./hooks/use-session-chat-runtime";
 
-const KNOWN_SANDBOX_TYPES = ["vercel"] as const;
+const KNOWN_SANDBOX_TYPES = ["vercel", "e2b"] as const;
 type KnownSandboxType = (typeof KNOWN_SANDBOX_TYPES)[number];
 
 function asKnownSandboxType(value: unknown): KnownSandboxType | null {
@@ -770,10 +770,12 @@ export function SessionChatProvider({
     asKnownSandboxType(sessionRecord.sandboxState?.type) ?? "vercel";
   const supportsDiff =
     sessionRecord.sandboxState?.type === undefined ||
-    sessionRecord.sandboxState.type === "vercel";
+    sessionRecord.sandboxState.type === "vercel" ||
+    sessionRecord.sandboxState.type === "e2b";
   const supportsRepoCreation =
     sessionRecord.sandboxState?.type === undefined ||
-    sessionRecord.sandboxState.type === "vercel";
+    sessionRecord.sandboxState.type === "vercel" ||
+    sessionRecord.sandboxState.type === "e2b";
   const hasRuntimeSandboxState = hasRuntimeSandboxStateValue(
     sessionRecord.sandboxState,
   );

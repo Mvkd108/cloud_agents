@@ -17,6 +17,10 @@ import {
 } from "@/lib/managed-template-trial";
 import { sanitizeUserPreferencesForSession } from "@/lib/model-access";
 import { getRandomCityName } from "@/lib/random-city";
+import {
+  getDefaultSandboxProvider,
+  isSandboxProviderEnabled,
+} from "@/lib/sandbox/provider-policy";
 import { getServerSession } from "@/lib/session/get-server-session";
 
 interface RepoPageProps {
@@ -136,7 +140,11 @@ export default async function RepoPage({ params }: RepoPageProps) {
       autoCreatePrOverride: preferences.autoCommitPush
         ? preferences.autoCreatePr
         : false,
-      sandboxState: { type: preferences.defaultSandboxType },
+      sandboxState: {
+        type: isSandboxProviderEnabled(preferences.defaultSandboxType)
+          ? preferences.defaultSandboxType
+          : getDefaultSandboxProvider(),
+      },
       lifecycleState: "provisioning",
       lifecycleVersion: 0,
     },

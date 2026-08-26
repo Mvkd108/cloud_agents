@@ -25,7 +25,6 @@ export async function connectE2B(
       ? {
           url: state.source.repo,
           branch: state.source.branch,
-          token: state.source.token,
           newBranch: state.source.newBranch,
         }
       : undefined,

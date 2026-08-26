@@ -16,6 +16,7 @@ import {
   hasRuntimeSandboxState,
   isSandboxUnavailableError,
 } from "@/lib/sandbox/utils";
+import { isSandboxProviderEnabled } from "@/lib/sandbox/provider-policy";
 
 export type ReconnectStatus =
   | "connected"
@@ -77,6 +78,15 @@ export async function GET(req: Request): Promise<Response> {
   }
 
   const { sessionRecord } = sessionContext;
+  if (
+    sessionRecord.sandboxState?.type === "e2b" &&
+    !isSandboxProviderEnabled("e2b")
+  ) {
+    return Response.json(
+      { error: "The E2B sandbox provider is not enabled on this deployment" },
+      { status: 503 },
+    );
+  }
   const hasPausedState =
     !hasRuntimeSandboxState(sessionRecord.sandboxState) &&
     (hasPausedSandboxState(sessionRecord.sandboxState) ||

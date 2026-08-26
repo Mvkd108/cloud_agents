@@ -15,8 +15,6 @@ export interface VercelSandboxConfig {
     url: string;
     /** Branch to clone (defaults to "main") */
     branch?: string;
-    /** Deprecated: do not embed GitHub tokens in sandbox remotes. */
-    token?: string;
     /**
      * Create and checkout a new branch after cloning.
      * Useful for isolating agent changes from the main branch.

@@ -2,8 +2,10 @@
 
 > **Experimental only.** This standalone API/worker path is not authenticated by
 > the web product, is not part of the supported deployment, and must not be
-> exposed publicly. The Reliable Cloud-Agent MVP uses `apps/web`, the existing
-> Open Agent, Vercel Workflow, and Vercel Sandbox exclusively.
+> exposed publicly. The supported product uses `apps/web`, the existing Open
+> Agent, and Vercel Workflow; it may use Vercel Sandbox or explicitly enabled
+> E2B compute. Running Codex inside E2B through this separate control plane
+> remains experimental.
 
 This fork keeps the Open Agents web product shell and adds a separate control
 plane for E2B-hosted Codex runs.

@@ -87,7 +87,14 @@ export function SessionsRouteShell({
     return `/sessions/${targetSession.id}`;
   }, []);
 
-  const { preferences } = useUserPreferences();
+  const { preferences, availableSandboxTypes } = useUserPreferences();
+
+  const availableSandboxType =
+    preferences?.defaultSandboxType &&
+    (availableSandboxTypes?.includes(preferences.defaultSandboxType) ??
+      preferences.defaultSandboxType === DEFAULT_SANDBOX_TYPE)
+      ? preferences.defaultSandboxType
+      : DEFAULT_SANDBOX_TYPE;
 
   const openNewSessionDialog = useCallback(() => {
     setNewSessionOpen(true);
@@ -186,7 +193,7 @@ export function SessionsRouteShell({
           repoName,
           cloneUrl: `https://github.com/${repoOwner}/${repoName}`,
           isNewBranch: true,
-          sandboxType: preferences?.defaultSandboxType ?? DEFAULT_SANDBOX_TYPE,
+          sandboxType: availableSandboxType,
           autoCommitPush: preferences?.autoCommitPush ?? false,
           autoCreatePr: preferences?.autoCreatePr ?? false,
         });
@@ -197,7 +204,7 @@ export function SessionsRouteShell({
         console.error("Failed to create session for repo:", error);
       }
     },
-    [createSession, preferences, router],
+    [createSession, availableSandboxType, preferences, router],
   );
 
   const handleCreateSessionFromBranch = useCallback(
@@ -209,7 +216,7 @@ export function SessionsRouteShell({
           branch,
           cloneUrl: `https://github.com/${repoOwner}/${repoName}`,
           isNewBranch: false,
-          sandboxType: preferences?.defaultSandboxType ?? DEFAULT_SANDBOX_TYPE,
+          sandboxType: availableSandboxType,
           autoCommitPush: preferences?.autoCommitPush ?? false,
           autoCreatePr: preferences?.autoCreatePr ?? false,
         });
@@ -220,7 +227,7 @@ export function SessionsRouteShell({
         console.error("Failed to create session from branch:", error);
       }
     },
-    [createSession, preferences, router],
+    [createSession, availableSandboxType, preferences, router],
   );
 
   useEffect(() => {

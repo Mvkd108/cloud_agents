@@ -157,6 +157,7 @@ export class VercelSandbox implements Sandbox {
   private _ports?: number[];
   private networkOperation?: "dependencies" | "github" | "detached";
   private hasDetachedCommand = false;
+  private activeForegroundCommands = 0;
 
   private async updateNetworkPolicy(policy: NetworkPolicy): Promise<void> {
     if (typeof this.sdk.updateNetworkPolicy !== "function") {
@@ -179,6 +180,11 @@ export class VercelSandbox implements Sandbox {
     if (this.hasDetachedCommand) {
       throw new Error(
         "Network-enabled operations are unavailable after starting a detached command",
+      );
+    }
+    if (this.activeForegroundCommands > 0) {
+      throw new Error(
+        "Network-enabled operations are unavailable while a general command is running",
       );
     }
 
@@ -1075,7 +1081,12 @@ ${hostLine}${portLines}${runtimeEnvLine}`;
       };
     }
 
-    return this.executeCommand(command, cwd, timeoutMs, options);
+    this.activeForegroundCommands += 1;
+    try {
+      return await this.executeCommand(command, cwd, timeoutMs, options);
+    } finally {
+      this.activeForegroundCommands -= 1;
+    }
   }
 
   /**
@@ -1089,6 +1100,11 @@ ${hostLine}${portLines}${runtimeEnvLine}`;
     if (this.networkOperation) {
       throw new Error(
         "Detached commands cannot start during a sandbox network operation",
+      );
+    }
+    if (this.activeForegroundCommands > 0) {
+      throw new Error(
+        "Detached commands cannot start while a general command is running",
       );
     }
 

@@ -29,11 +29,19 @@ import {
 } from "@/lib/sandbox/lifecycle";
 import { kickSandboxLifecycleWorkflow } from "@/lib/sandbox/lifecycle-kick";
 import {
+  buildSandboxConnectOptions,
+  buildSandboxState,
+} from "@/lib/sandbox/provisioning";
+import {
+  getDefaultSandboxProvider,
+  isSandboxProviderEnabled,
+} from "@/lib/sandbox/provider-policy";
+import {
   canOperateOnSandbox,
   clearSandboxState,
-  getSessionSandboxName,
   hasResumableSandboxState,
 } from "@/lib/sandbox/utils";
+import type { SandboxType } from "@/components/sandbox-selector-compact";
 import { getServerSession } from "@/lib/session/get-server-session";
 import { checkRateLimit, rateLimitKey } from "@/lib/rate-limit";
 // import { buildDevelopmentDotenvFromVercelProject } from "@/lib/vercel/projects";
@@ -44,7 +52,7 @@ interface CreateSandboxRequest {
   branch?: string;
   isNewBranch?: boolean;
   sessionId?: string;
-  sandboxType?: "vercel";
+  sandboxType?: SandboxType;
 }
 
 // async function syncVercelProjectEnvVarsToSandbox(params: {
@@ -85,7 +93,11 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  if (body.sandboxType && body.sandboxType !== "vercel") {
+  if (
+    body.sandboxType !== undefined &&
+    body.sandboxType !== "vercel" &&
+    body.sandboxType !== "e2b"
+  ) {
     return Response.json({ error: "Invalid sandbox type" }, { status: 400 });
   }
 
@@ -127,17 +139,23 @@ export async function POST(req: Request) {
 
   sessionRecord = sessionContext.sessionRecord;
 
-  if (
-    sessionRecord.sandboxState &&
-    sessionRecord.sandboxState.type !== "vercel"
-  ) {
+  const persistedType = sessionRecord.sandboxState?.type;
+  if (persistedType && body.sandboxType && persistedType !== body.sandboxType) {
     return Response.json(
-      { error: "This session uses an unsupported sandbox type" },
+      { error: "This session uses a different sandbox type" },
       { status: 409 },
     );
   }
 
-  const sandboxName = getSessionSandboxName(sessionId);
+  const sandboxType: SandboxState["type"] =
+    persistedType ?? body.sandboxType ?? getDefaultSandboxProvider();
+
+  if (sandboxType === "e2b" && !isSandboxProviderEnabled("e2b")) {
+    return Response.json(
+      { error: "The E2B sandbox provider is not enabled on this deployment" },
+      { status: 400 },
+    );
+  }
 
   const source = repoUrl
     ? {
@@ -202,22 +220,20 @@ export async function POST(req: Request) {
     };
 
     sandbox = await connectSandbox({
-      state: {
-        type: "vercel",
-        ...(sandboxName ? { sandboxName } : {}),
+      state: buildSandboxState({
+        session: sessionRecord,
+        sandboxType,
         source,
-      },
-      options: {
+      }),
+      options: buildSandboxConnectOptions({
+        sandboxType,
         githubToken: setupToken?.token,
         gitUser,
         timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
         vcpus: DEFAULT_SANDBOX_VCPUS,
         ports: DEFAULT_SANDBOX_PORTS,
         baseSnapshotId: DEFAULT_SANDBOX_BASE_SNAPSHOT_ID,
-        persistent: !!sandboxName,
-        resume: !!sandboxName,
-        createIfMissing: !!sandboxName,
-      },
+      }),
     });
   } finally {
     if (setupToken) {
@@ -225,12 +241,9 @@ export async function POST(req: Request) {
     }
   }
 
-  let persistedSandboxType: SandboxState["type"] = "vercel";
+  let persistedSandboxType: SandboxState["type"] = sandboxType;
   if (sessionId && sandbox.getState) {
     const nextState = sandbox.getState() as SandboxState;
-    if (nextState.type !== "vercel") {
-      throw new Error("Sandbox provider returned an unsupported runtime state");
-    }
     persistedSandboxType = nextState.type;
     await updateSession(sessionId, {
       sandboxState: nextState,

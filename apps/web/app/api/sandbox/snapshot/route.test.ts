@@ -1,12 +1,18 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 
 mock.module("server-only", () => ({}));
 
-type TestSandboxState = {
-  type: "vercel";
-  sandboxName?: string;
-  expiresAt?: number;
-};
+type TestSandboxState =
+  | {
+      type: "vercel";
+      sandboxName?: string;
+      expiresAt?: number;
+    }
+  | {
+      type: "e2b";
+      sandboxId?: string;
+      expiresAt?: number;
+    };
 
 type TestSessionRecord = {
   id: string;
@@ -31,6 +37,8 @@ const kickCalls: Array<{ sessionId: string; reason: string }> = [];
 let stopCallCount = 0;
 let connectSandboxResumeError: Error | null = null;
 let sessionRecord: TestSessionRecord;
+const originalE2BFlag = process.env.E2B_SANDBOX_ENABLED;
+const originalE2BApiKey = process.env.E2B_API_KEY;
 
 mock.module("@/app/api/sessions/_lib/session-context", () => ({
   requireAuthenticatedUser: async () => ({
@@ -103,11 +111,19 @@ mock.module("@open-agents/sandbox", () => ({
       stop: async () => {
         stopCallCount += 1;
       },
-      getState: () => ({
-        type: "vercel" as const,
-        sandboxName,
-        expiresAt: Date.now() + 120_000,
-      }),
+      getState: () =>
+        state.type === "e2b"
+          ? {
+              type: "e2b" as const,
+              sandboxId: "e2b-sandbox-1",
+              repoPath: "/home/user/repo",
+              expiresAt: Date.now() + 120_000,
+            }
+          : {
+              type: "vercel" as const,
+              sandboxName,
+              expiresAt: Date.now() + 120_000,
+            },
     };
   },
 }));
@@ -144,6 +160,21 @@ describe("/api/sandbox/snapshot", () => {
     stopCallCount = 0;
     connectSandboxResumeError = null;
     sessionRecord = makeSessionRecord();
+    delete process.env.E2B_SANDBOX_ENABLED;
+    delete process.env.E2B_API_KEY;
+  });
+
+  afterEach(() => {
+    if (originalE2BFlag === undefined) {
+      delete process.env.E2B_SANDBOX_ENABLED;
+    } else {
+      process.env.E2B_SANDBOX_ENABLED = originalE2BFlag;
+    }
+    if (originalE2BApiKey === undefined) {
+      delete process.env.E2B_API_KEY;
+    } else {
+      process.env.E2B_API_KEY = originalE2BApiKey;
+    }
   });
 
   test("POST pauses a named persistent sandbox without writing a legacy snapshot", async () => {
@@ -264,6 +295,83 @@ describe("/api/sandbox/snapshot", () => {
         lifecycleState: "hibernated",
       }),
     );
+  });
+
+  test("PUT rejects E2B resume when the provider is unavailable", async () => {
+    const { PUT } = await routeModulePromise;
+
+    sessionRecord = makeSessionRecord({
+      sandboxState: {
+        type: "e2b",
+        sandboxId: "e2b-sandbox-1",
+      },
+      lifecycleState: "hibernated",
+      sandboxExpiresAt: null,
+      hibernateAfter: null,
+    });
+
+    const response = await PUT(
+      new Request("http://localhost/api/sandbox/snapshot", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: "session-1" }),
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(connectCalls).toHaveLength(0);
+  });
+
+  test("PUT resumes a paused E2B sandbox through its sandboxId", async () => {
+    const { PUT } = await routeModulePromise;
+    process.env.E2B_SANDBOX_ENABLED = "true";
+    process.env.E2B_API_KEY = "e2b-test-key";
+
+    sessionRecord = makeSessionRecord({
+      sandboxState: {
+        type: "e2b",
+        sandboxId: "e2b-sandbox-1",
+      },
+      lifecycleState: "hibernated",
+      sandboxExpiresAt: null,
+      hibernateAfter: null,
+    });
+
+    const response = await PUT(
+      new Request("http://localhost/api/sandbox/snapshot", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: "session-1" }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      success?: boolean;
+      restoredFrom?: string;
+    };
+
+    expect(response.ok).toBe(true);
+    expect(payload.success).toBe(true);
+    expect(payload.restoredFrom).toBe("e2b-sandbox-1");
+    expect(connectCalls[0]).toMatchObject({
+      state: {
+        type: "e2b",
+        sandboxId: "e2b-sandbox-1",
+      },
+    });
+    expect(updateCalls[0]).toEqual(
+      expect.objectContaining({
+        sandboxState: expect.objectContaining({
+          type: "e2b",
+          sandboxId: "e2b-sandbox-1",
+        }),
+        snapshotUrl: null,
+        snapshotCreatedAt: null,
+        lifecycleVersion: 3,
+      }),
+    );
+    expect(kickCalls).toEqual([
+      { sessionId: "session-1", reason: "snapshot-restored" },
+    ]);
   });
 
   test("PUT lazily migrates a legacy snapshot-backed session on first resume", async () => {

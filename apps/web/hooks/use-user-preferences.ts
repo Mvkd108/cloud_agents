@@ -25,6 +25,7 @@ export interface UserPreferences {
 
 interface PreferencesResponse {
   preferences: UserPreferences;
+  availableSandboxTypes?: SandboxType[];
 }
 
 export function useUserPreferences() {
@@ -34,6 +35,7 @@ export function useUserPreferences() {
   );
 
   const preferences = data?.preferences;
+  const availableSandboxTypes = data?.availableSandboxTypes;
 
   const updatePreferences = async (
     updates: Partial<UserPreferences>,
@@ -51,12 +53,19 @@ export function useUserPreferences() {
 
     const responseData = (await res.json()) as PreferencesResponse;
     // Optimistically update the cache
-    mutate({ preferences: responseData.preferences }, { revalidate: false });
+    mutate(
+      {
+        preferences: responseData.preferences,
+        availableSandboxTypes: responseData.availableSandboxTypes,
+      },
+      { revalidate: false },
+    );
     return responseData.preferences;
   };
 
   return {
     preferences,
+    availableSandboxTypes,
     loading: isLoading,
     error: error?.message ?? null,
     updatePreferences,

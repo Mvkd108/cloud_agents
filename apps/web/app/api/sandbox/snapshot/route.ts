@@ -3,6 +3,7 @@ import {
   requireAuthenticatedUser,
   requireOwnedSession,
   requireOwnedSessionWithSandboxGuard,
+  type SessionRecord,
 } from "@/app/api/sessions/_lib/session-context";
 import { updateSession } from "@/lib/db/sessions";
 import {
@@ -16,12 +17,14 @@ import {
   getNextLifecycleVersion,
 } from "@/lib/sandbox/lifecycle";
 import { kickSandboxLifecycleWorkflow } from "@/lib/sandbox/lifecycle-kick";
+import { isSandboxProviderEnabled } from "@/lib/sandbox/provider-policy";
 import {
   canOperateOnSandbox,
   clearSandboxResumeState,
   clearSandboxState,
   getResumableSandboxName,
   getSessionSandboxName,
+  hasResumableSandboxState,
   hasRuntimeSandboxState,
   isSandboxNotFoundError,
 } from "@/lib/sandbox/utils";
@@ -32,6 +35,80 @@ interface CreateSnapshotRequest {
 
 interface RestoreSnapshotRequest {
   sessionId: string;
+}
+
+async function resumeE2BSandbox(params: {
+  sessionId: string;
+  sessionRecord: SessionRecord;
+  sandboxType: string;
+}): Promise<Response> {
+  const { sessionId, sessionRecord, sandboxType } = params;
+  const resumeState = sessionRecord.sandboxState;
+
+  if (!resumeState || !hasResumableSandboxState(resumeState)) {
+    console.error(
+      `[Snapshot Restore] session=${sessionId} error=no_resume_state sandboxType=${sandboxType}`,
+    );
+    return Response.json(
+      { error: "No sandbox available for resume" },
+      { status: 404 },
+    );
+  }
+
+  try {
+    const sandbox = await connectSandbox(resumeState);
+    const restoredState = (sandbox.getState?.() ?? resumeState) as Parameters<
+      typeof updateSession
+    >[1]["sandboxState"];
+
+    await updateSession(sessionId, {
+      sandboxState: restoredState,
+      snapshotUrl: null,
+      snapshotCreatedAt: null,
+      lifecycleVersion: getNextLifecycleVersion(sessionRecord.lifecycleVersion),
+      ...buildActiveLifecycleUpdate(restoredState),
+    });
+
+    kickSandboxLifecycleWorkflow({
+      sessionId,
+      reason: "snapshot-restored",
+    });
+
+    console.log(
+      `[Snapshot Restore] session=${sessionId} success=true sandboxType=${sandboxType} sandboxId=${resumeState.sandboxId}`,
+    );
+
+    return Response.json({
+      success: true,
+      restoredFrom: resumeState.sandboxId,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (isSandboxNotFoundError(message)) {
+      await updateSession(sessionId, {
+        sandboxState: clearSandboxResumeState(resumeState),
+        ...buildHibernatedLifecycleUpdate(),
+      });
+      console.error(
+        `[Snapshot Restore] session=${sessionId} success=false error=${message}`,
+      );
+      return Response.json(
+        {
+          error: "Saved sandbox is no longer available. Create a new sandbox.",
+        },
+        { status: 404 },
+      );
+    }
+
+    console.error(
+      `[Snapshot Restore] session=${sessionId} success=false error=${message}`,
+    );
+    return Response.json(
+      { error: `Failed to resume sandbox: ${message}` },
+      { status: 500 },
+    );
+  }
 }
 
 /**
@@ -136,16 +213,6 @@ export async function PUT(req: Request) {
   const { sessionRecord } = sessionContext;
   const sandboxType = sessionRecord.sandboxState?.type ?? "vercel";
 
-  if (sandboxType !== "vercel") {
-    return Response.json(
-      {
-        error:
-          "Snapshot restoration is only supported for the current cloud sandbox provider",
-      },
-      { status: 400 },
-    );
-  }
-
   if (hasRuntimeSandboxState(sessionRecord.sandboxState)) {
     const restoredFrom =
       getResumableSandboxName(sessionRecord.sandboxState) ??
@@ -158,6 +225,25 @@ export async function PUT(req: Request) {
       success: true,
       alreadyRunning: true,
       restoredFrom,
+    });
+  }
+
+  // E2B pause/resume parity: a paused E2B sandbox is resumed through its
+  // persisted sandboxId. Vercel-native snapshot restore (legacy snapshot URLs)
+  // remains unavailable for E2B sessions.
+  if (sandboxType === "e2b") {
+    if (!isSandboxProviderEnabled("e2b")) {
+      return Response.json(
+        {
+          error: "The E2B sandbox provider is not enabled on this deployment",
+        },
+        { status: 503 },
+      );
+    }
+    return resumeE2BSandbox({
+      sessionId,
+      sessionRecord,
+      sandboxType,
     });
   }
 

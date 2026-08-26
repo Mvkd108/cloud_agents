@@ -15,7 +15,6 @@ export interface E2BSandboxConfig {
   source?: {
     url: string;
     branch?: string;
-    token?: string;
     newBranch?: string;
   };
   gitUser?: {

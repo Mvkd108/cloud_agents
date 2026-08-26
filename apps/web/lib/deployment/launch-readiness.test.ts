@@ -85,6 +85,46 @@ describe("evaluateLaunchReadiness", () => {
     ).toBe("OPENAI_COMPATIBLE_MODELS contains duplicate model IDs.");
   });
 
+  test("passes when E2B sandboxes are disabled", () => {
+    const report = evaluateLaunchReadiness(validEnvironment);
+
+    expect(report.checks.find((item) => item.id === "e2b-sandbox")).toEqual({
+      id: "e2b-sandbox",
+      label: "E2B sandbox provider",
+      status: "pass",
+      message:
+        "E2B sandboxes are disabled; Vercel Sandbox remains the default.",
+    });
+  });
+
+  test("blocks launch when the E2B flag is set without an API key", () => {
+    const report = evaluateLaunchReadiness({
+      ...validEnvironment,
+      E2B_SANDBOX_ENABLED: "true",
+    });
+
+    expect(report.ready).toBe(false);
+    expect(report.checks.find((item) => item.id === "e2b-sandbox")).toEqual({
+      id: "e2b-sandbox",
+      label: "E2B sandbox provider",
+      status: "block",
+      message: "E2B_SANDBOX_ENABLED=true requires E2B_API_KEY.",
+    });
+  });
+
+  test("passes when E2B is fully enabled", () => {
+    const report = evaluateLaunchReadiness({
+      ...validEnvironment,
+      E2B_SANDBOX_ENABLED: "true",
+      E2B_API_KEY: "e2b-secret",
+    });
+
+    expect(
+      report.checks.find((item) => item.id === "e2b-sandbox")?.status,
+    ).toBe("pass");
+    expect(report.ready).toBe(true);
+  });
+
   test("never includes configured secret values in the report", () => {
     const report = evaluateLaunchReadiness({
       ...validEnvironment,
